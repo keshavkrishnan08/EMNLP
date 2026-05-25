@@ -632,8 +632,10 @@ def make_results() -> list[dict]:
         ),
         setup_code(
             extras="train",
-            pip_packages="",  # the `train` extra already pulls stanza + datasets
-            extras_comment=_TRAIN_COMMENT + " (also covers stanza + datasets).",
+            # stanza is the one runtime dep not on Kaggle's image; install it
+            # explicitly so parsing works regardless of the [train] extra resolve.
+            pip_packages="stanza",
+            extras_comment=_TRAIN_COMMENT + " (plus stanza, which Kaggle lacks).",
         ),
         # Usually nothing to restore (this is the first notebook), but the cell
         # makes re-running after a partial run merge cleanly.
@@ -691,9 +693,11 @@ def make_smoke() -> list[dict]:
         ),
         setup_code(
             extras="train",
-            pip_packages="",
-            extras_comment="Smoke runs every stage, so install the full stack "
-            "(train extra covers stanza + datasets; core deps cover analysis).",
+            # Kaggle's GPU image already has torch/transformers/etc.; the one
+            # runtime dep it lacks is stanza (for parsing). Install it explicitly
+            # so the parse stage works even if the [train] extra resolve is skipped.
+            pip_packages="stanza",
+            extras_comment="Smoke runs every stage; stanza is the dep Kaggle lacks.",
         ),
         restore_code(),
         gpu_detect_code(),

@@ -63,23 +63,36 @@ def _iter_documents(raw_path: Path) -> Iterator[tuple[str, str]]:
 
 
 def _build_pipeline(use_gpu: bool):
-    """Construct the Stanza pipeline. Imported lazily so the module loads bare."""
+    """Construct the Stanza pipeline. Imported lazily so the module loads bare.
+
+    Auto-downloads the English models if they're missing — Stanza needs a
+    one-time ``download('en')`` and a fresh Kaggle/Colab box won't have them, so
+    we do it here rather than make the caller remember a separate step. The
+    download is idempotent (it skips models already on disk).
+    """
     try:
         import stanza
     except ImportError as exc:  # pragma: no cover - depends on env
         raise RuntimeError(
             "Stanza is required to parse the corpus. Install it with "
-            "`pip install stanza` and download the English models "
-            "(`stanza.download('en')`)."
+            "`pip install stanza`."
         ) from exc
 
-    return stanza.Pipeline(
-        lang=STANZA_LANG,
-        processors=STANZA_PROCESSORS,
-        use_gpu=use_gpu,
-        # Batched, no verbose per-batch chatter — our own logger handles progress.
-        verbose=False,
-    )
+    def _make():
+        return stanza.Pipeline(
+            lang=STANZA_LANG,
+            processors=STANZA_PROCESSORS,
+            use_gpu=use_gpu,
+            # Batched, no verbose per-batch chatter — our own logger handles progress.
+            verbose=False,
+        )
+
+    try:
+        return _make()
+    except Exception:  # noqa: BLE001 - most likely the models aren't downloaded yet
+        logger.info("Stanza models missing; downloading the English models once...")
+        stanza.download(STANZA_LANG, processors=STANZA_PROCESSORS, verbose=False)
+        return _make()
 
 
 # Standard CoNLL-U column order, used by the manual serialiser below.
