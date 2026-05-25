@@ -82,23 +82,59 @@ def _build_pipeline(use_gpu: bool):
     )
 
 
+# Standard CoNLL-U column order, used by the manual serialiser below.
+_CONLLU_COLUMNS = ("id", "text", "lemma", "upos", "xpos", "feats", "head", "deprel", "deps", "misc")
+
+
 def _sentence_to_conllu(sentence, sent_id: int, domain: str) -> str:
     """Render one Stanza sentence as a CoNLL-U block with our header lines.
 
-    Stanza can emit CoNLL-U itself, but we prepend our own ``# sent_id``,
-    ``# source_domain`` and ``# text`` so downstream readers have a stable key,
-    can match replacements by domain, and can show the sentence without
-    rebuilding it from tokens.
+    We prepend our own ``# sent_id``, ``# source_domain`` and ``# text`` so
+    downstream readers have a stable key, can match replacements by domain, and
+    can show the sentence without rebuilding it from tokens.
     """
-    from stanza.utils.conll import CoNLL
-
-    body = CoNLL.conll_as_string(CoNLL.convert_dict([sentence.to_dict()]))
     header = (
         f"# sent_id = {sent_id}\n"
         f"# source_domain = {domain}\n"
         f"# text = {sentence.text}\n"
     )
-    return header + body
+    return header + _conllu_body(sentence)
+
+
+def _conllu_body(sentence) -> str:
+    """Serialise a sentence's tokens to CoNLL-U lines, version-proof.
+
+    Stanza's CoNLL helper has changed names across releases (``conll_as_string``
+    exists in some versions, not others), so we don't depend on it. We prefer the
+    stable ``convert_dict`` (it handles multi-word tokens correctly) and fall back
+    to building the ten columns by hand from ``to_dict()`` if that API differs.
+    Either way the output is standard CoNLL-U that ``CoNLL.conll2doc`` reads back.
+    """
+    try:
+        from stanza.utils.conll import CoNLL
+
+        token_rows = CoNLL.convert_dict([sentence.to_dict()])[0]
+        return "".join("\t".join(str(f) for f in row) + "\n" for row in token_rows)
+    except Exception:
+        return _manual_conllu_body(sentence)
+
+
+def _manual_conllu_body(sentence) -> str:
+    """Build CoNLL-U token lines directly from ``sentence.to_dict()``.
+
+    Handles multi-word-token range ids (a tuple ``(start, end)`` -> ``start-end``)
+    and fills any absent field with ``_``, matching the CoNLL-U spec.
+    """
+    lines = []
+    for tok in sentence.to_dict():
+        tid = tok.get("id")
+        id_str = f"{tid[0]}-{tid[-1]}" if isinstance(tid, (list, tuple)) else str(tid)
+        row = [id_str]
+        for key in _CONLLU_COLUMNS[1:]:
+            value = tok.get(key)
+            row.append("_" if value is None or value == "" else str(value))
+        lines.append("\t".join(row))
+    return "".join(line + "\n" for line in lines)
 
 
 def parse_corpus(
