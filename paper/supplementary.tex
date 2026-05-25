@@ -1,0 +1,254 @@
+% =====================================================================
+% supplementary.tex --- Appendices for the EMNLP 2026 submission
+% "Dose-Response Curves for Construction Learning in Small Language Models"
+%
+% Compiles standalone. To bind these as appendices of main.tex instead,
+% move the \appendix block and \section{...} contents into main.tex and
+% delete the preamble here. See main.tex for notes on obtaining acl.sty.
+% =====================================================================
+
+\IfFileExists{acl.sty}{%
+  \documentclass[11pt]{article}
+  \usepackage[review]{acl}
+}{%
+  \documentclass[11pt]{article}
+  \usepackage[margin=1in]{geometry}
+  \usepackage{natbib}
+  \bibliographystyle{plainnat}
+  \PackageWarningNoLine{supp}{acl.sty not found --- using plain article
+    fallback. Install the EMNLP 2026 style before submitting.}
+}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{url}
+
+\newcommand{\resultpending}[1]{%
+  \textcolor{red}{\textbf{[RESULT PENDING: #1]}}}
+\newcommand{\TODO}[1]{\textcolor{blue}{\textbf{[TODO: #1]}}}
+
+\title{Supplementary Material:\\
+  Dose-Response Curves for Construction Learning in\\
+  Small Language Models}
+\author{Anonymous Submission}
+
+\begin{document}
+\maketitle
+\appendix
+
+% =====================================================================
+\section{Filter Specifications}
+\label{app:filters}
+Each construction is detected by a dedicated filter over Stanza dependency
+parses \citep{qi2020stanza}, with surface fallbacks where parses are
+brittle. We re-run the relevant filter after building each dose corpus to
+verify realized counts.
+
+\paragraph{AANN (article + adjective + numeral + plural noun).}
+We match the four-token core \emph{article ADJ NUM Noun.Plural} (as in
+``a beautiful five days'') and confirm the article actually depends on the
+plural noun head, which rules out coincidental sequences that span a clause
+boundary. The semantics treat the plural as a measured quantity, which is
+why an indefinite article can scope over a plural NP
+\citep{mahowald2023aann}.
+
+\paragraph{Comparative correlative (``the X-er $\ldots$, the Y-er $\ldots$'').}
+We detect two ``the + comparative'' openings split by a comma, with the
+first clause at the start of the sentence. The ``the'' here is a frozen
+degree marker, not an ordinary article. A regex fallback over raw text
+recovers cases where the parser mangles the unusual syntax (e.g.\ ``the
+more the merrier''), boosting recall \citep{weissweiler2022comparative}.
+
+\paragraph{Tough-movement (``this book is tough to read'').}
+We match the reliable surface frame \emph{BE + tough-adjective + ``to'' +
+VERB} using a fixed tough-class adjective lexicon. We deliberately do not
+verify the syntactic gap, which is brittle to parse; the lexicalized
+surface frame is precise enough \citep{hu2020syntaxgym}.
+
+\paragraph{Resultative (V + NP + AP naming a result state).}
+We require, in the dependency parse, a verb that governs both an \texttt{obj}
+and an adjectival \texttt{xcomp} (the result phrase), as in ``hammered the
+metal flat.'' Testing the dependency structure directly avoids reasoning
+about result semantics from the surface string
+\citep{goldberg2004resultatives}.
+
+\paragraph{Dose corpus construction.}
+Removed positive sentences are replaced by matched sentences from a
+100M-word pool, in priority order: (1) same source domain, (2) length
+within $\pm 20\%$, relaxing to $\pm 40\%$, then (3) nearest-length
+sentence from the same domain. Corpus generation uses a fixed seed (42),
+and every corpus ships with an audit JSON of kept/removed/swapped
+sentences. \resultpending{realized attested-``all'' counts per construction;
+fill from results/dose\_corpora\_sanity.json}
+
+% =====================================================================
+\section{Evaluation Item Schema and Counts}
+\label{app:items}
+Evaluation items are stored as JSONL minimal pairs, one per line, with the
+fields below.
+
+\begin{table}[h]
+  \centering
+  \small
+  \begin{tabular}{ll}
+    \toprule
+    Field & Description \\
+    \midrule
+    \texttt{item\_id}          & unique identifier \\
+    \texttt{construction}      & target construction \\
+    \texttt{good\_sentence}    & grammatical member \\
+    \texttt{bad\_sentence}     & minimally altered ungrammatical member \\
+    \texttt{minimal\_pair\_type} & contrast type (e.g.\ word\_order) \\
+    \texttt{source}            & provenance / template note \\
+    \texttt{notes}             & rationale for the contrast \\
+    \bottomrule
+  \end{tabular}
+  \caption{Evaluation item schema (JSONL).}
+  \label{tab:item-schema}
+\end{table}
+
+A model is scored correct on a pair when
+$\mathrm{SLOR}(\text{good}) > \mathrm{SLOR}(\text{bad})$. Per-construction
+item counts:
+
+\begin{table}[h]
+  \centering
+  \small
+  \begin{tabular}{lc}
+    \toprule
+    Construction & \# minimal pairs \\
+    \midrule
+    AANN                    & 30 \\
+    Comparative correlative & \resultpending{count once items finalized} \\
+    Tough-movement          & \resultpending{count once items finalized} \\
+    Resultative             & \resultpending{count once items finalized} \\
+    \bottomrule
+  \end{tabular}
+  \caption{Evaluation item counts. AANN items are finalized (30 pairs);
+    the remaining sets are in progress (\texttt{evaluation/eval\_items/}).}
+  \label{tab:item-counts}
+\end{table}
+
+% =====================================================================
+\section{Training Hyperparameters}
+\label{app:hyperparams}
+All values below are frozen across the 60 runs
+(\texttt{configs/base.yaml}). They are the BabyLM strict-track winning
+configuration for LTG-BERT \citep{samuel2023ltgbert}; we do not tune them
+per construction or dose.
+
+\begin{table}[h]
+  \centering
+  \small
+  \begin{tabular}{ll}
+    \toprule
+    Hyperparameter & Value \\
+    \midrule
+    \multicolumn{2}{l}{\emph{Architecture (LTG-BERT base)}} \\
+    Hidden size              & 384 \\
+    Layers                   & 12 \\
+    Attention heads          & 6 \\
+    Intermediate size        & 1024 \\
+    Max position embeddings  & 128 \\
+    Vocabulary size          & 16{,}384 \\
+    \midrule
+    \multicolumn{2}{l}{\emph{Optimization}} \\
+    Optimizer                & AdamW \\
+    $\beta_1, \beta_2$       & 0.9, 0.98 \\
+    $\epsilon$               & $1\times10^{-6}$ \\
+    Weight decay             & 0.1 \\
+    Peak learning rate       & $1\times10^{-3}$ \\
+    LR schedule              & cosine (decay to 0) \\
+    Warmup ratio             & 0.1 \\
+    Max grad norm            & 1.0 \\
+    \midrule
+    \multicolumn{2}{l}{\emph{Training}} \\
+    Batch size               & 256 sequences \\
+    Max sequence length      & 128 \\
+    Epochs                   & 20 \\
+    Precision                & bf16 \\
+    MLM probability          & 0.15 (whole-word) \\
+    Held-out slice           & 100k words \\
+    \bottomrule
+  \end{tabular}
+  \caption{Frozen training configuration (\texttt{configs/base.yaml}).}
+  \label{tab:hyperparams}
+\end{table}
+
+% =====================================================================
+\section{Reproducibility Checklist}
+\label{app:repro}
+\begin{itemize}
+  \item \textbf{Data.} BabyLM-10M corpus and 100M-word replacement pool,
+        both public; parsed with Stanza \citep{qi2020stanza}.
+  \item \textbf{Dose corpora.} Generated once with corpus seed 42 and
+        frozen; per-corpus audit JSON records every kept/removed/swapped
+        sentence; filters re-run to verify counts.
+  \item \textbf{Models.} LTG-BERT trained from scratch, frozen recipe
+        (Appendix~\ref{app:hyperparams}); training seeds 42, 43, 44; 60
+        runs total. Implementation: Hugging Face Transformers
+        \citep{wolf2020transformers}.
+  \item \textbf{Evaluation.} SLOR with masked-LM pseudo-log-likelihood
+        \citep{pauls2012slor}; unigram correction from each model's own
+        dose corpus; every model scored on all four test sets; $n$-gram
+        baseline as control. Results streamed row-by-row with resume.
+  \item \textbf{Analysis.} Hill fits via bounded NLS with parametric
+        bootstrap CIs (1{,}000 resamples; \citealp{efron1993bootstrap});
+        AIC/BIC model comparison; $k$-means clustering with silhouette.
+  \item \textbf{Decision.} Pre-registered rule applied by
+        \texttt{drc.analysis.decision}; verdict written to
+        \texttt{results/decision.txt}.
+  \item \textbf{Artifacts released.} Code, frozen corpora, evaluation
+        items, fitted curves, and figures.
+  \item \textbf{Compute.} \resultpending{report total GPU hours and
+        hardware once runs complete}
+\end{itemize}
+
+% =====================================================================
+\section{Pre-Registered Hypotheses and Decision Rules}
+\label{app:hypotheses}
+We locked the following five hypotheses, their thresholds, and the
+hypothesis-to-title mapping before inspecting any fitted numbers
+(\texttt{src/drc/analysis/decision.py}). The rules are checked in order;
+if more than one fires, or none fires cleanly, we report ``Mixed'' and
+point back to the Outcome Matrix rather than forcing a headline.
+
+\begin{itemize}
+  \item \textbf{H1 --- Smooth scaling.} Hill wins by AIC for every
+        construction \emph{and} mean Hill coefficient $n \in [0.5, 2.0]$.
+        Learning is a gentle saturating climb.
+        \emph{Title:} ``A Scaling Law for Construction Learning in
+        Language Models.''
+  \item \textbf{H2 --- Phase transition.} Hill wins everywhere but mean
+        $n > 4$. Same curve, far steeper: grammatical grokking.
+        \emph{Title:} ``Grammatical Grokking: Phase Transitions in
+        Construction Acquisition.''
+  \item \textbf{H3 --- Heterogeneous regimes.} $k{=}2$ clusters separate
+        cleanly (silhouette $> 0.5$), or Hill wins for some constructions
+        while the step model wins for others. Two routes to grammar.
+        \emph{Title:} ``Two Routes to Grammar: Heterogeneous Dose-Response
+        in Construction Learning.''
+  \item \textbf{H4 --- Indirect evidence dominates.} The floor-to-ceiling
+        gain is tiny: mean $(E_{\max}-E_0)/E_{\max} < 0.1$. Direct exposure
+        barely moves the needle.
+        \emph{Title:} ``Direct Exposure Doesn't Matter: Indirect Evidence
+        in Construction Learning.''
+  \item \textbf{H5 --- Stochastic acquisition.} Mean within-cell CV across
+        seeds exceeds mean between-cell CV across doses. Seed noise swamps
+        the dose signal.
+        \emph{Title:} ``Stochastic Construction Acquisition: When Seeds
+        Beat Doses.''
+\end{itemize}
+
+\paragraph{Verdict.}
+\resultpending{which hypothesis fired and the supporting statistics; fill
+from results/decision.txt}
+
+% =====================================================================
+\bibliography{references}
+
+\end{document}

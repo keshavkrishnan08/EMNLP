@@ -1,0 +1,50 @@
+# Data and model artifacts are reconstructed by the pipeline, never committed.
+# BabyLM is redistributed under its own terms — see data/README.md for download.
+data/raw/
+data/parsed/
+data/filtered/
+data/dose_corpora/
+data/qa_audits/
+models/
+!models/.gitkeep
+results/
+!results/.gitkeep
+
+# Keep the curated evaluation items (small, hand-checked) under version control.
+!evaluation/eval_items/*.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Julia
+analysis_julia/Manifest.toml
+
+# LaTeX build artifacts
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.synctex.gz
+paper/*.fdb_latexmk
+paper/*.fls
+paper/*.pdf
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

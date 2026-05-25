@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software or its findings, please cite the paper."
+title: "Dose-Response Curves for Construction Learning in Small Language Models"
+authors:
+  - family-names: Krishnan
+    given-names: Eswar
+repository-code: "https://github.com/your-org/drc-emnlp-2026"
+license: MIT
+keywords:
+  - language models
+  - construction grammar
+  - BabyLM
+  - dose-response
+  - grammatical generalization
+preferred-citation:
+  type: conference-paper
+  title: "A Scaling Law for Grammatical Acquisition: Dose-Response Curves for Construction Learning in Small Language Models"
+  authors:
+    - family-names: Krishnan
+      given-names: Eswar
+  collection-title: "Proceedings of EMNLP 2026"
+  year: 2026
+  notes: "Working title; the final framing is selected from the Outcome Matrix after the pre-registered decision rule fires."

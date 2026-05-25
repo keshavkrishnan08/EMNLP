@@ -1,0 +1,37 @@
+# Per-construction metadata: the four targets plus their expected attested
+# counts in BabyLM-10M and where their evaluation items come from. The counts
+# are sanity bounds for the QA audit (Subagent A acceptance test), not hard
+# requirements — the actual attested count for dose="all" is read from the
+# corpus at generation time.
+
+aann:
+  name: "Article + Adjective + Numeral + Noun-plural"
+  example: "a beautiful five days in Texas"
+  expected_count: [200, 500]
+  eval_items: evaluation/eval_items/aann.jsonl
+  # Productive but rare; predicts smooth power-law with high E0 (per AANN paper).
+  hypothesized_cluster: productive_rare
+
+comparative_correlative:
+  name: "Comparative Correlative (the X-er, the Y-er)"
+  example: "the harder you try, the worse it gets"
+  expected_count: [400, 800]
+  eval_items: evaluation/eval_items/comparative_correlative.jsonl
+  # Semi-idiomatic; predicts a sharper transition, intermediate Hill n.
+  hypothesized_cluster: semi_idiomatic
+
+tough_movement:
+  name: "Tough-Movement (this book is tough to read)"
+  example: "the painting is easy to admire"
+  expected_count: [800, 1500]
+  eval_items: evaluation/eval_items/tough_movement.jsonl
+  # Classic poverty-of-stimulus phenomenon; high indirect-evidence support.
+  hypothesized_cluster: indirect_rich
+
+resultative:
+  name: "Resultative (she ran herself ragged)"
+  example: "he hammered the metal flat"
+  expected_count: [500, 900]
+  eval_items: evaluation/eval_items/resultative.jsonl
+  # Argument-structure construction; predicts high seed variance.
+  hypothesized_cluster: argument_structure

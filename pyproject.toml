@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drc-emnlp-2026"
+version = "0.1.0"
+description = "Dose-response curves for construction learning in small language models"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Eswar Krishnan" }]
+keywords = ["nlp", "language-models", "babylm", "construction-grammar", "dose-response"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Core dependencies needed to run the pipeline end to end. The heavy ML stack is
+# imported lazily, so installing only these still lets the package import and the
+# tests run; you need them present for the train/eval stages.
+dependencies = [
+    "pyyaml>=6.0",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "scikit-learn>=1.3",
+    "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+# The pieces that need a GPU or large downloads. Kept separate so CI and local
+# development don't have to pull PyTorch.
+train = [
+    "torch>=2.1",
+    "transformers>=4.40",
+    "tokenizers>=0.15",
+    "safetensors>=0.4",
+    "accelerate>=0.28",
+    "datasets>=2.18",
+    "stanza>=1.7",
+]
+# Optional LLM-as-judge for the filter QA audit.
+judge = ["anthropic>=0.25"]
+dev = ["pytest>=7.4", "ruff>=0.4"]
+
+[project.urls]
+Repository = "https://github.com/your-org/drc-emnlp-2026"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# A sensible default set: pyflakes, pycodestyle, isort, bugbear, comprehensions.
+select = ["E", "F", "I", "B", "C4", "UP"]
+ignore = ["E501"]  # line length is handled by the formatter, not the linter

@@ -1,0 +1,583 @@
+% =====================================================================
+% main.tex --- EMNLP 2026 submission
+% "A Scaling Law for Grammatical Acquisition: Dose-Response Curves for
+%  Construction Learning in Small Language Models"
+%
+% --------------------------------------------------------------------
+% STYLE FILES
+% --------------------------------------------------------------------
+% This paper targets the official ACL/EMNLP LaTeX style. Before the
+% camera-ready (or for a faithful preview), download the EMNLP 2026
+% release of:
+%     acl.sty           (the document class wrapper / package)
+%     acl_natbib.bst    (the bibliography style)
+% from the ACL submission instructions page and drop them in THIS
+% directory. With those present, \usepackage{acl} just works.
+%
+% If acl.sty is absent, the guarded block below falls back to a plain
+% 11pt article preamble so the skeleton still compiles end-to-end. The
+% fallback is for drafting only --- never submit it.
+% --------------------------------------------------------------------
+%
+% NOTE ON TITLE: the working title below is neutral. The FINAL title is
+% selected from the PRD Outcome Matrix once the pre-registered decision
+% rule fires (see src/drc/analysis/decision.py and Appendix E). Do not
+% lock the title before the decision script has run on real results.
+% =====================================================================
+
+\IfFileExists{acl.sty}{%
+  \documentclass[11pt]{article}
+  \usepackage[review]{acl}       % drop [review] for camera-ready
+}{%
+  % ---- Graceful fallback preamble (drafting only) ----
+  \documentclass[11pt]{article}
+  \usepackage[margin=1in]{geometry}
+  \usepackage{natbib}
+  \bibliographystyle{plainnat}
+  \setlength{\parindent}{1em}
+  \PackageWarningNoLine{main}{acl.sty not found --- using plain article
+    fallback. Install the EMNLP 2026 style before submitting.}
+}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\usepackage{url}
+
+% --------------------------------------------------------------------
+% PLACEHOLDER MACROS
+% --------------------------------------------------------------------
+% \resultpending{...} : a visible, impossible-to-miss stand-in for a
+%   number or finding that depends on experiments NOT YET RUN. Every
+%   data-dependent claim in this skeleton uses it. Search the compiled
+%   PDF for "RESULT PENDING" to find everything still to fill.
+\newcommand{\resultpending}[1]{%
+  \textcolor{red}{\textbf{[RESULT PENDING: #1]}}}
+% \TODO{...} : an author-facing note, also rendered visibly.
+\newcommand{\TODO}[1]{\textcolor{blue}{\textbf{[TODO: #1]}}}
+
+% Convenience: typeset the Hill equation parameters consistently.
+\newcommand{\Ezero}{$E_0$}
+\newcommand{\Emax}{$E_{\max}$}
+\newcommand{\Efifty}{$\mathrm{EC}_{50}$}
+\newcommand{\hilln}{$n$}
+
+\title{A Scaling Law for Grammatical Acquisition:\\
+  Dose-Response Curves for Construction Learning in\\
+  Small Language Models}
+% Working title --- final title chosen from the Outcome Matrix once the
+% decision rule fires on real data (Appendix E).
+
+\author{Anonymous Submission \\
+  EMNLP 2026 \\
+  \texttt{anonymous@example.org}}
+
+\begin{document}
+\maketitle
+
+% =====================================================================
+\begin{abstract}
+How much exposure does a language model need to learn a grammatical
+construction? We treat that question the way pharmacology treats a drug.
+We hold a 10-million-word pretraining corpus fixed, then vary one thing:
+the number of times a target construction appears, dosed at 0, 4, 16, 64,
+and every attested instance. Train an LTG-BERT model from scratch at each
+dose, measure acceptability with a syntactic log-odds-ratio (SLOR) score
+on minimal pairs, and you can fit a dose-response curve and read off
+interpretable parameters --- a floor with zero exposure, a ceiling, a
+half-saturation dose, and a steepness that tells smooth scaling apart from
+a sharp threshold. We run this across four constructions (AANN, the
+comparative correlative, tough-movement, and the resultative) and three
+random seeds, giving 60 models in a single frozen training recipe.
+We pre-registered five hypotheses and the rules that pick between them.
+\resultpending{which hypothesis fired and its one-line summary}
+\resultpending{headline dose-response finding: mean Hill coefficient and
+  what it implies about smooth vs.\ threshold learning}
+\resultpending{cross-construction summary: do constructions cluster into
+  distinct learning regimes?}
+Our code, frozen corpora, and evaluation items are released for full
+reproduction.
+\end{abstract}
+
+% =====================================================================
+\section{Introduction}
+\label{sec:intro}
+
+A child hears some constructions thousands of times and others almost
+never, yet ends up fluent in both. Language models face the same
+lopsided diet. Some patterns saturate their training data; others, like
+the article-adjective-numeral-noun construction in ``a beautiful five
+days,'' show up only a handful of times in millions of words
+\citep{mahowald2023aann,misra2024aann}. So a natural question follows:
+how does a model's command of a construction depend on how often it sees
+that construction during pretraining?
+
+Most work answers this only at the extremes. Filtered-corpus training
+asks whether a model can learn a phenomenon from \emph{zero} direct
+exposure, leaning entirely on indirect evidence
+\citep{patil2024fict,leong2024passives,misra2024aann}. That's a sharp,
+useful test. But it skips the middle of the curve. Between ``never seen
+it'' and ``seen it everywhere'' lies the interesting part: does
+competence rise smoothly with exposure, or snap into place past a
+threshold? Does every construction follow the same trajectory, or do
+different constructions need wildly different amounts of data?
+
+We borrow the workhorse tool of dose-response pharmacology. Swap drug
+concentration for ``number of construction exposures in pretraining'' and
+biological response for ``minimal-pair acceptability'' and the
+four-parameter Hill equation maps cleanly onto our question. Its
+parameters are readable. The floor \Ezero{} is what the model scores with
+zero direct exposure --- a clean measure of how far indirect evidence
+alone gets you. The ceiling \Emax{} is where competence saturates. The
+half-saturation dose \Efifty{} answers ``how much data does this
+construction need.'' And the Hill coefficient \hilln{} is the shape knob:
+near 1 the curve is a gentle saturating rise, and much larger than that it
+sharpens into a step --- the signature of a phase transition.
+
+To make the curve mean something, we have to keep everything else fixed.
+We start from BabyLM-10M \citep{warstadt2023babylm,choshen2024babylm} and,
+for each construction, build a family of corpora that differ in exactly
+one variable: the dose. Removed sentences are replaced by length- and
+domain-matched sentences from a 100M-word pool, so corpus size and genre
+mix stay constant while only the construction count moves. We then train
+LTG-BERT \citep{samuel2023ltgbert} from scratch at each dose with one
+frozen recipe, holding architecture, optimizer, and schedule identical
+across all 60 runs. Tuning per dose would just invite worries about
+p-hacking; freezing the recipe is what keeps the comparison honest.
+
+We study four constructions chosen to span the space: AANN (productive but
+rare), the comparative correlative (semi-idiomatic;
+\citealp{weissweiler2022comparative}), tough-movement (a classic
+poverty-of-stimulus case; \citealp{hu2020syntaxgym}), and the resultative
+(an argument-structure construction; \citealp{goldberg2004resultatives}).
+Three random seeds per cell let seed-to-seed spread become a real
+distribution rather than a footnote.
+
+Crucially, we locked our analysis before seeing any fitted numbers. Five
+hypotheses --- smooth scaling, phase transition, heterogeneous regimes,
+indirect-evidence dominance, and stochastic acquisition --- each map to a
+specific paper framing, and a pre-registered decision rule picks the
+winner from the data (Appendix~\ref{app:hypotheses}). The result we report
+is whatever the rule selects, not a story we backfilled.
+
+Our contributions:
+\begin{itemize}
+  \item A dose-response methodology for construction learning that fits
+        interpretable Hill curves to acceptability as a function of
+        pretraining exposure, with a frozen 60-run design.
+  \item A pre-registered hypothesis space and decision rule that fixes the
+        interpretation in advance.
+  \item \resultpending{empirical contribution stated once results exist}
+  \item Released code, frozen dose corpora, evaluation items, and fitted
+        curves for full reproduction.
+\end{itemize}
+
+% =====================================================================
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Filtered-corpus training and indirect evidence.}
+The closest line of work removes a target phenomenon from pretraining and
+asks whether a model learns it anyway. \citet{patil2024fict} formalize
+this as filtered-corpus training and show models generalize to held-out
+syntactic phenomena from indirect evidence alone. \citet{leong2024passives}
+study the passive and find that learning from indirect evidence demands
+large amounts of data. \citet{misra2024aann} run the cleanest case for our
+purposes: they filter AANNs from training and show models still rate them,
+because related, less-rare constructions teach the pattern indirectly.
+Recent benchmark work probes the sample efficiency of these syntactic
+heuristics directly \citep{anonymous2026posh}. All of these fix the dose at
+either zero or ``all.'' We fill in the curve between.
+
+\paragraph{The BabyLM setting.}
+Training on a developmentally plausible budget of words has become its own
+research program \citep{warstadt2023babylm,choshen2024babylm,rozner2025babylm}.
+LTG-BERT \citep{samuel2023ltgbert} is a strong sample-efficient encoder in
+this regime and is the architecture we adopt. The small-data setting is
+ideal for dosing: a construction that appears a handful of times in 10M
+words is genuinely rare, so the low-dose conditions are realistic rather
+than artificial. Work on impossible languages \citep{kallini2024mission}
+and on formal-language pre-pretraining \citep{hu2025circuits} shows these
+small models are sensitive probes of structural learnability.
+
+\paragraph{Constructions and acquisition.}
+We take a construction-grammar view: form-meaning pairings that range from
+fully productive to frozen and idiomatic
+\citep{goldberg1995constructions,goldberg2004resultatives,tomasello2003constructing}.
+This contrasts with a poverty-of-stimulus framing on which core grammar is
+underdetermined by the input \citep{chomsky1965aspects}, a debate that
+language models have reopened \citep{lan2026llmsps}. The four targets here
+have established linguistic analyses and existing probes
+\citep{weissweiler2022comparative,hu2020syntaxgym,goldberg2004resultatives,mahowald2023aann}.
+Work comparing model and child learning stages motivates treating exposure
+as a developmental variable \citep{evanson2023acquisition}.
+
+\paragraph{Scaling, frequency, and memorization.}
+Frequency drives what models learn: rare, long-tail knowledge needs far
+more exposure \citep{kandpal2023longtail}, and recent work separates
+generalization from memorization as a function of pretraining frequency
+\citep{wang2024memorization,morris2025memorization}. We measure that
+dependence directly for grammatical constructions and fit it with an
+interpretable curve.
+
+\paragraph{Acceptability measurement.}
+We score acceptability with SLOR \citep{pauls2012slor}, which corrects a
+sentence's log-probability for word rarity, evaluated on minimal pairs in
+the BLiMP tradition \citep{warstadt2020blimp}. For our masked encoder we
+use the pseudo-log-likelihood variant standard for masked LMs.
+
+% =====================================================================
+\section{Methods}
+\label{sec:methods}
+
+Everything in this section is fixed by design and does not depend on
+results. The recipe is frozen across all 60 runs.
+
+\subsection{Construction selection}
+\label{sec:methods-constructions}
+We study four English constructions chosen to span productivity,
+idiomaticity, and argument structure:
+\begin{itemize}
+  \item \textbf{AANN}: article + adjective + numeral + plural noun, as in
+        ``a beautiful five days in Texas.'' Productive but rare; the
+        indefinite article scopes over a plural measured quantity
+        \citep{mahowald2023aann,misra2024aann}.
+  \item \textbf{Comparative correlative}: ``the X-er $\ldots$, the
+        Y-er $\ldots$,'' as in ``the harder you try, the worse it gets.''
+        Semi-idiomatic, with a frozen degree-marking ``the''
+        \citep{weissweiler2022comparative}.
+  \item \textbf{Tough-movement}: ``this book is tough to read,'' where the
+        understood object of the embedded verb surfaces as the matrix
+        subject. A textbook poverty-of-stimulus dependency
+        \citep{hu2020syntaxgym}.
+  \item \textbf{Resultative}: V + NP + AP where the AP names a result
+        state, as in ``he hammered the metal flat.'' An argument-structure
+        construction \citep{goldberg2004resultatives}.
+\end{itemize}
+Each construction is detected by a dedicated structural filter over
+dependency parses, with surface fallbacks where parses are brittle; full
+filter specifications are in Appendix~\ref{app:filters}.
+
+\subsection{Dose corpus construction}
+\label{sec:methods-dose}
+For each construction we build five corpora that differ in exactly one
+variable --- the number of attested instances of the target construction
+present: doses 0, 4, 16, 64, and ``all'' (every instance left in place).
+The challenge is holding everything else constant. We do not simply delete
+positive sentences, since that would shrink the corpus and skew its genre
+mix, confounding the dose with corpus size. Instead, every removed
+sentence is replaced by a matched sentence drawn from a 100M-word pool,
+selecting in priority order: (1) same source domain, (2) length within
+$\pm 20\%$, relaxing to $\pm 40\%$, then (3) the nearest-length sentence
+from the same domain. Corpus construction uses one fixed seed (42); the
+dose corpora are generated once and frozen, and only training seeds vary
+the model. Each corpus ships with an audit JSON recording every kept,
+removed, and swapped-in sentence, and we re-run the construction filter
+afterward to verify the realized counts. Parsing uses Stanza
+\citep{qi2020stanza}.
+
+\subsection{Models and training}
+\label{sec:methods-models}
+We train LTG-BERT \citep{samuel2023ltgbert} from scratch on each dose
+corpus, using the BabyLM strict-track winning hyperparameters. The recipe
+is frozen across all runs: 12 layers, hidden size 384, 6 attention heads,
+intermediate size 1024, maximum sequence length 128, and a vocabulary of
+16{,}384 (a WordPiece tokenizer trained per dose corpus). We optimize the
+masked-LM objective with AdamW ($\beta_1{=}0.9$, $\beta_2{=}0.98$,
+$\epsilon{=}10^{-6}$, weight decay 0.1), peak learning rate $10^{-3}$ with
+a 10\% linear warmup and cosine decay, batch size 256, 20 epochs, bf16
+precision, and 15\% whole-word masking. We carve a 100k-word held-out
+slice off each corpus to track perplexity. The full hyperparameter table
+is in Appendix~\ref{app:hyperparams}. We run three random seeds (42, 43,
+44) per (construction, dose) cell, for $4 \times 5 \times 3 = 60$ models.
+Implementation uses Hugging Face Transformers \citep{wolf2020transformers}.
+
+\subsection{SLOR evaluation}
+\label{sec:methods-slor}
+We measure acceptability with the syntactic log-odds-ratio
+\citep{pauls2012slor}, which corrects a sentence's log-probability for the
+fact that rare words drag it down regardless of grammaticality:
+\begin{equation}
+  \mathrm{SLOR}(s) = \frac{\log P(s) - \log P_{\mathrm{uni}}(s)}{|s|},
+\end{equation}
+where $P_{\mathrm{uni}}$ is a corpus unigram model and $|s|$ is the word
+count. For our masked encoder there is no left-to-right $\log P(s)$, so we
+use the pseudo-log-likelihood: mask each content position in turn, read off
+the log-probability of the true token given the rest, and sum. The unigram
+correction for each model is built from that model's \emph{own} dose
+corpus, so the normalizer matches the word-frequency world the model
+trained on. On a minimal pair, the model is correct when
+$\mathrm{SLOR}(\text{good}) > \mathrm{SLOR}(\text{bad})$. We report
+per-(model, construction) mean accuracy with a binomial standard error.
+Each trained model is scored against \emph{all four} construction test
+sets, not just its own, so cross-construction (collateral) effects surface
+rather than hide. Evaluation item schemas and counts are in
+Appendix~\ref{app:items}. We also fit an $n$-gram baseline
+\citep{warstadt2020blimp} as a control.
+
+\subsection{Statistical analysis and Hill fitting}
+\label{sec:methods-hill}
+For each (construction, seed) we fit the four-parameter Hill equation to
+self-evaluation accuracy as a function of dose:
+\begin{equation}
+  Y(D) = E_0 + (E_{\max} - E_0)\,\frac{D^{\,n}}{\mathrm{EC}_{50}^{\,n} + D^{\,n}}.
+  \label{eq:hill}
+\end{equation}
+We fit with bounded nonlinear least squares (trust-region reflective),
+constraining \Ezero{} and \Emax{} to $[0,1]$ and \Efifty{}, \hilln{} to be
+positive. The dose ``all'' is resolved to the construction's attested count
+recorded at generation time. Confidence intervals come from a parametric
+bootstrap: resample residuals under the fitted curve, refit, and take 2.5
+/97.5 percentiles over 1{,}000 resamples \citep{efron1993bootstrap}. The
+bootstrap avoids leaning on asymptotic normality, which is shaky with only
+five dose points.
+
+A good Hill fit alone proves little, so we pit it against simpler shapes
+and let AIC and BIC referee: a power law $a(D{+}1)^b{+}c$, a step function,
+a log-linear $a + b\log(D{+}1)$, and a null (the mean). To ask whether
+constructions learn the same way, we cluster the fitted parameter vectors
+$[E_0, \log \mathrm{EC}_{50}, n, E_{\max}]$ with $k$-means for
+$k \in \{2,3,4\}$ and record silhouette scores. A clean split at $k{=}2$ is
+the quantitative tell for distinct learning regimes.
+
+Finally, we apply the pre-registered decision rule
+(Appendix~\ref{app:hypotheses}), which reads these statistics and names the
+hypothesis the data supports. The rule, the thresholds, and the
+hypothesis-to-title mapping were all locked before any fit was inspected.
+
+% =====================================================================
+\section{Results}
+\label{sec:results}
+
+% All quantitative content in this section is pending experiments. Tables
+% and the decision verdict will be filled from results/*.csv and
+% results/decision.txt; figures are auto-generated into results/figures/.
+
+\subsection{Dose-response curves}
+\label{sec:results-curves}
+Figure~\ref{fig:dose-response} shows fitted dose-response curves per
+construction, with per-seed lines, the mean, a bootstrap ribbon, and the
+Hill overlay. \resultpending{describe the overall curve shape and whether
+fits converged across cells; fill from results/hill_fits.csv}
+
+\begin{figure}[t]
+  \centering
+  \IfFileExists{../results/figures/fig1_dose_response_curves.pdf}{%
+    \includegraphics[width=\columnwidth]{../results/figures/fig1_dose_response_curves.pdf}}{%
+    \fbox{\parbox{0.9\columnwidth}{\centering\vspace{2em}
+      \resultpending{fig1\_dose\_response\_curves.pdf not yet generated ---
+        run \texttt{python -m drc.analysis.figures}}\vspace{2em}}}}
+  \caption{Dose-response curves by construction (2$\times$2). Per-seed
+    lines, mean, bootstrap ribbon, and fitted Hill overlay.}
+  \label{fig:dose-response}
+\end{figure}
+
+\subsection{Fitted Hill parameters}
+\label{sec:results-params}
+Table~\ref{tab:hill} reports the fitted Hill parameters per construction,
+averaged over seeds with bootstrap 95\% CIs. The Hill coefficient \hilln{}
+is the key quantity: it separates smooth scaling from a phase transition.
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lcccc}
+    \toprule
+    Construction & \Ezero & \Emax & \Efifty & \hilln \\
+    \midrule
+    AANN          & \resultpending{} & \resultpending{} & \resultpending{} & \resultpending{} \\
+    Comp.\ corr.  & \resultpending{} & \resultpending{} & \resultpending{} & \resultpending{} \\
+    Tough-mov.    & \resultpending{} & \resultpending{} & \resultpending{} & \resultpending{} \\
+    Resultative   & \resultpending{} & \resultpending{} & \resultpending{} & \resultpending{} \\
+    \bottomrule
+  \end{tabular}
+  \caption{Fitted Hill parameters (mean over seeds, 95\% bootstrap CI).
+    Fill from \texttt{results/hill\_fits.csv}.}
+  \label{tab:hill}
+\end{table}
+
+Figure~\ref{fig:clusters} scatters the fitted parameters, colored by
+construction and marked by seed.
+
+\begin{figure}[t]
+  \centering
+  \IfFileExists{../results/figures/fig2_parameter_clusters.pdf}{%
+    \includegraphics[width=\columnwidth]{../results/figures/fig2_parameter_clusters.pdf}}{%
+    \fbox{\parbox{0.9\columnwidth}{\centering\vspace{2em}
+      \resultpending{fig2\_parameter\_clusters.pdf not yet generated}\vspace{2em}}}}
+  \caption{Fitted Hill parameters per construction and seed.}
+  \label{fig:clusters}
+\end{figure}
+
+\subsection{Model comparison and clustering}
+\label{sec:results-modelcomp}
+Table~\ref{tab:modelcomp} reports, per construction, which curve shape wins
+by AIC, testing whether the Hill curve earns its parameters against simpler
+alternatives. \resultpending{which model wins per construction and the
+$k{=}2$ silhouette; fill from results/model\_comparison.csv and
+results/cluster\_assignments.csv}
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lcc}
+    \toprule
+    Construction & Best model (AIC) & $\Delta$AIC vs.\ next \\
+    \midrule
+    AANN          & \resultpending{} & \resultpending{} \\
+    Comp.\ corr.  & \resultpending{} & \resultpending{} \\
+    Tough-mov.    & \resultpending{} & \resultpending{} \\
+    Resultative   & \resultpending{} & \resultpending{} \\
+    \bottomrule
+  \end{tabular}
+  \caption{Curve-shape model comparison. Fill from
+    \texttt{results/model\_comparison.csv}.}
+  \label{tab:modelcomp}
+\end{table}
+
+\subsection{Seed variance}
+\label{sec:results-seed}
+Figure~\ref{fig:seedvar} shows a construction-by-dose heatmap of the
+coefficient of variation across seeds, the input to the stochastic
+hypothesis test. \resultpending{whether within-seed wobble swamps the dose
+effect}
+
+\begin{figure}[t]
+  \centering
+  \IfFileExists{../results/figures/fig3_seed_variance.pdf}{%
+    \includegraphics[width=\columnwidth]{../results/figures/fig3_seed_variance.pdf}}{%
+    \fbox{\parbox{0.9\columnwidth}{\centering\vspace{2em}
+      \resultpending{fig3\_seed\_variance.pdf not yet generated}\vspace{2em}}}}
+  \caption{Coefficient of variation across seeds, by construction and dose.}
+  \label{fig:seedvar}
+\end{figure}
+
+\subsection{Baseline and collateral effects}
+\label{sec:results-collateral}
+Figure~\ref{fig:ngram} compares the neural LM against the $n$-gram control,
+and Figure~\ref{fig:collateral} shows the 4$\times$4 train-by-eval accuracy
+heatmap that exposes collateral effects of dosing one construction on
+another. \resultpending{do off-diagonal effects appear?}
+
+\begin{figure}[t]
+  \centering
+  \IfFileExists{../results/figures/fig4_ngram_comparison.pdf}{%
+    \includegraphics[width=\columnwidth]{../results/figures/fig4_ngram_comparison.pdf}}{%
+    \fbox{\parbox{0.9\columnwidth}{\centering\vspace{2em}
+      \resultpending{fig4\_ngram\_comparison.pdf not yet generated}\vspace{2em}}}}
+  \caption{Neural LM vs.\ $n$-gram baseline (2$\times$2).}
+  \label{fig:ngram}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \IfFileExists{../results/figures/fig5_collateral_effects.pdf}{%
+    \includegraphics[width=\columnwidth]{../results/figures/fig5_collateral_effects.pdf}}{%
+    \fbox{\parbox{0.9\columnwidth}{\centering\vspace{2em}
+      \resultpending{fig5\_collateral\_effects.pdf not yet generated}\vspace{2em}}}}
+  \caption{Collateral effects: mean accuracy across train/eval pairs.}
+  \label{fig:collateral}
+\end{figure}
+
+\subsection{Pre-registered decision}
+\label{sec:results-decision}
+Applying the locked decision rule
+(Appendix~\ref{app:hypotheses}) to the statistics above:
+\resultpending{which of H1--H5 fired, with the supporting numbers; fill
+from results/decision.txt}
+
+% =====================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+% The framing below is keyed to which hypothesis fires. Keep only the
+% matching block once results/decision.txt names the winner; the others
+% are guarded scaffolding so no claim is made prematurely.
+
+\resultpending{which hypothesis fired --- keep the matching paragraph, delete the rest}
+
+\paragraph{If H1 (smooth scaling) fired.}
+% Hill wins by AIC for every construction and mean n in [0.5, 2.0].
+A single saturating law would describe construction learning: competence
+rises gradually and predictably with exposure, and the half-saturation
+dose \Efifty{} becomes a usable ``data budget'' per construction.
+\resultpending{quantify and contrast \Efifty{} across the four constructions}
+
+\paragraph{If H2 (phase transition) fired.}
+% Hill wins everywhere but mean n > 4: grammatical grokking.
+The same curve, far steeper, would point to grammatical grokking ---
+competence snapping into place past a threshold rather than accumulating.
+\resultpending{report the threshold dose and steepness}
+
+\paragraph{If H3 (heterogeneous regimes) fired.}
+% Clean k=2 split, or Hill wins for some and step for others.
+Constructions would split into distinct learning regimes, not one law.
+\resultpending{name which constructions fall in which regime and why}
+
+\paragraph{If H4 (indirect evidence dominates) fired.}
+% Mean (Emax - E0)/Emax < 0.1: direct exposure barely moves the needle.
+Direct exposure would barely matter: a high floor \Ezero{} means indirect
+evidence already does most of the work, echoing filtered-corpus findings
+\citep{patil2024fict,misra2024aann}.
+\resultpending{report the floor-to-ceiling gain per construction}
+
+\paragraph{If H5 (stochastic acquisition) fired.}
+% Within-seed CV exceeds between-dose CV.
+Seed-to-seed variation would swamp the dose effect, making acquisition
+look more like a coin flip on initialization than a function of exposure.
+\resultpending{report within- vs.\ between-cell CV}
+
+\paragraph{If the rule was mixed.}
+\resultpending{summarize the mixed verdict and point to the Outcome Matrix}
+
+% =====================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+We framed construction learning as a dose-response problem, fit
+interpretable Hill curves to acceptability as a function of pretraining
+exposure, and pre-registered the rule that interprets them. The design ---
+a frozen 60-run sweep with matched-replacement dose corpora --- isolates
+exposure from corpus size and genre. \resultpending{one-sentence takeaway
+once the decision rule has fired}
+
+% =====================================================================
+\section*{Limitations}
+\label{sec:limitations}
+Our study is deliberately narrow. We train small encoders (about 24M
+parameters) on a 10M-word budget; whether the same curves hold for larger
+models and corpora is open. We study four English constructions, so claims
+about ``construction learning'' generalize only as far as that sample. SLOR
+on minimal pairs is one acceptability proxy among several, and the
+pseudo-log-likelihood for masked LMs is an approximation. Doses top out at
+the attested count in 10M words, so we cannot probe the very high-exposure
+regime that large web corpora reach. Five dose points is few for nonlinear
+curve fitting, which is exactly why we bootstrap rather than trust
+asymptotic errors, and why we test the Hill curve against simpler shapes.
+Matched replacement controls corpus size and domain but cannot guarantee
+that no indirect cue to the target construction rides along in the
+replacement sentences. Finally, three seeds give a coarse estimate of
+seed variance.
+
+% =====================================================================
+\section*{Ethics Statement}
+\label{sec:ethics}
+This work trains small language models from scratch on the public
+BabyLM-10M corpus and a public 100M-word replacement pool, using existing
+released data; we introduce no new human-subjects data and no personally
+identifying information. The compute footprint is modest by design: 60
+small-model pretraining runs on a developmentally plausible word budget,
+in keeping with the sample-efficiency goals of the BabyLM program. Our
+released artifacts (code, frozen corpora, evaluation items, fitted curves)
+are intended to support reproduction and carry the same low risk profile as
+the underlying public data. We see no direct path to harm beyond the
+general risks of language modeling.
+
+% =====================================================================
+\bibliography{references}
+
+\end{document}

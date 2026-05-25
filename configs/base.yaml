@@ -1,0 +1,56 @@
+# Frozen training configuration for every run in the sweep.
+#
+# These are the BabyLM 2024 strict-track winning hyperparameters (Samuel et al.
+# 2023, LTG-BERT). Do NOT tune them per construction or per dose: holding the
+# config fixed across all 60 runs is what makes the dose-response comparison
+# clean, and tuning would invite reviewer concern about p-hacking.
+
+model:
+  architecture: ltg-bert-base
+  hidden_size: 384
+  num_hidden_layers: 12
+  num_attention_heads: 6
+  intermediate_size: 1024
+  max_position_embeddings: 128
+  vocab_size: 16384
+
+training:
+  batch_size: 256          # sequences; 256 * 128 = 32,768 tokens / step
+  max_seq_length: 128
+  learning_rate: 1.0e-3
+  warmup_ratio: 0.1
+  lr_schedule: cosine      # decay to 0
+  optimizer: adamw
+  adam_beta1: 0.9
+  adam_beta2: 0.98
+  adam_epsilon: 1.0e-6
+  weight_decay: 0.1
+  num_epochs: 20
+  mlm_probability: 0.15
+  whole_word_masking: true
+  max_grad_norm: 1.0
+  precision: bf16
+  log_every_n_steps: 100
+  save_every_n_epochs: 5
+  # Held-out slice (word count) carved off each corpus for perplexity tracking.
+  heldout_words: 100000
+
+evaluation:
+  # Acceptance band for the pilot (C1=aann at dose=all, seed=42): final held-out
+  # perplexity below this, and AANN minimal-pair accuracy inside [0.55, 0.75]
+  # to replicate Misra & Mahowald (2024).
+  pilot_max_perplexity: 40.0
+  pilot_aann_acc_range: [0.55, 0.75]
+  # Sweep-wide sanity band for held-out perplexity.
+  perplexity_range: [15.0, 40.0]
+
+paths:
+  raw_corpus: data/raw/babylm_10M
+  replacement_pool: data/raw/babylm_100M_pool
+  parsed: data/parsed/babylm_10M.conllu
+  filtered: data/filtered
+  dose_corpora: data/dose_corpora
+  tokenizer: models/tokenizer
+  models: models
+  eval_items: evaluation/eval_items
+  results: results
