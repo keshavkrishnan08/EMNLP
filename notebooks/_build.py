@@ -634,14 +634,18 @@ _TRAIN_COMMENT = "Training needs the ML stack: torch, transformers, accelerate, 
 def make_run_all() -> list[dict]:
     return [
         intro_md(
-            "DRC — Run the whole pipeline (single session)",
-            "This is the **master** notebook: every stage end to end (data, "
-            "training, evaluation, and all analysis/figures) in one go. It's "
-            "right at Kaggle's ~12-hour session cap, so it suits dual-GPU or a "
-            "re-run that resumes a mostly-finished pipeline. For a single-T4 run, "
-            "prefer the split notebooks — `kaggle_01a_data_train` (session 1) then "
-            "`kaggle_01b_eval_analysis` (session 2) — so each half fits a session.",
-            "**Scope:** every stage (`only=None`).",
+            "DRC — Run the whole pipeline (one notebook, resumes across sessions)",
+            "Every stage end to end (data, training, evaluation, analysis, "
+            "figures) in **one notebook** — no Add Input, no dataset chaining. "
+            "The trick for going past the 12 h cap on a single T4: turn on "
+            "**Persistence** (Settings -> Persistence -> *Files only*). That keeps "
+            "`/kaggle/working` between sessions of THIS notebook, so when a session "
+            "ends mid-training you just start a new one and **re-run** — finished "
+            "models and stages are detected and skipped, and it continues until "
+            "done. No files to move yourself. (The `01a`/`01b` split is the "
+            "alternative if you'd rather not use Persistence.)",
+            "**Scope:** every stage (`only=None`). Set `FORCE_SINGLE_GPU = True` "
+            "for one T4.",
         ),
         # The master needs everything: ML stack + data deps + analysis deps.
         setup_code(
