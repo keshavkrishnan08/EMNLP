@@ -31,6 +31,7 @@ CLI::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import random
@@ -90,33 +91,50 @@ def find_positives(
     return hits
 
 
+def _stable_index(key: int, n: int) -> int:
+    """A deterministic index in ``[0, n)`` from an integer key.
+
+    We hash explicitly with md5 rather than Python's built-in ``hash``, whose
+    salt varies between interpreter runs — reproducibility across machines is
+    the whole point of the corpus seed.
+    """
+    digest = hashlib.md5(f"{CORPUS_SEED}:{key}".encode()).digest()
+    return int.from_bytes(digest[:8], "big") % max(1, n)
+
+
 def _choose_replacement(
     removed: ParsedSentence,
     pool_by_domain: dict[str, list[ParsedSentence]],
-    used: set[int],
-    rng: random.Random,
 ) -> ParsedSentence | None:
     """Pick a pool sentence to stand in for a removed positive.
 
-    Walks the matching ladder: same domain + tightening length bands, then the
-    nearest-length sentence from the same domain. Returns ``None`` only when the
-    domain has nothing left, which the caller logs and counts.
+    The choice is a deterministic function of the removed slot *alone* — same
+    domain, the tightest length band that has candidates, tie-broken by length
+    and sent_id, then indexed by a stable hash of the removed sentence's id. It
+    does **not** depend on the dose or on which other slots were removed.
+
+    That independence is what makes the dose ladder strictly nested: a slot
+    removed at both dose=4 and dose=16 gets the *same* filler, so the only thing
+    that differs between two doses is the handful of slots that flip from filler
+    back to a real instance. We deliberately allow a pool sentence to be reused
+    across slots (negligible at 10M words) rather than let a global "used" set
+    leak dose information into the corpus and reintroduce the confound.
     """
-    candidates = [s for s in pool_by_domain.get(removed.source_domain, [])
-                  if s.sent_id not in used]
+    candidates = pool_by_domain.get(removed.source_domain, [])
     if not candidates:
         return None
 
     target = removed.word_count
+    chosen = candidates
     for band in LENGTH_BANDS:
         lo, hi = target * (1 - band), target * (1 + band)
         in_band = [s for s in candidates if lo <= s.word_count <= hi]
         if in_band:
-            return rng.choice(in_band)
+            chosen = in_band
+            break
 
-    # Nothing in band — take the closest length from the same domain. Stable
-    # tie-break on sent_id so a fixed seed gives a fixed corpus.
-    return min(candidates, key=lambda s: (abs(s.word_count - target), s.sent_id))
+    ordered = sorted(chosen, key=lambda s: (abs(s.word_count - target), s.sent_id))
+    return ordered[_stable_index(removed.sent_id, len(ordered))]
 
 
 def _index_pool(pool: list[ParsedSentence]) -> dict[str, list[ParsedSentence]]:
@@ -124,6 +142,20 @@ def _index_pool(pool: list[ParsedSentence]) -> dict[str, list[ParsedSentence]]:
     for sent in pool:
         by_domain.setdefault(sent.source_domain, []).append(sent)
     return by_domain
+
+
+def _write_full_corpus(base_sentences: list[ParsedSentence], out_path: Path) -> None:
+    """Write the unfiltered corpus verbatim --- the shared E_max reference.
+
+    No construction is removed, so this is just the original parsed corpus in
+    CoNLL-U. One of these (per seed) is the ceiling point for every construction.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as fh:
+        for sent in base_sentences:
+            block = sent.block
+            fh.write(block if block.endswith("\n") else block + "\n")
+            fh.write("\n")
 
 
 def build_corpus(
@@ -166,21 +198,22 @@ def build_corpus(
     removed_set = set(remove_ids)
     by_id = {s.sent_id: s for s in base_sentences}
 
-    used_replacements: set[int] = set()
     replacement_assignments: dict[str, int] = {}  # removed_id -> pool sent_id
     unmatched: list[int] = []
 
     # Stream the corpus in original order, substituting as we hit a removal.
+    # Each filler is a deterministic function of its own slot (not the dose), so
+    # the ladder is strictly nested: corpus(dose=k) and corpus(dose=k') differ
+    # only in the slots that flip between a filler and a real instance.
     out_blocks: list[str] = []
     for sent in base_sentences:
         if sent.sent_id in removed_set:
-            repl = _choose_replacement(sent, pool_by_domain, used_replacements, rng)
+            repl = _choose_replacement(sent, pool_by_domain)
             if repl is None:
                 # No domain-matched replacement available. Drop the sentence and
                 # record it honestly rather than padding the count with junk.
                 unmatched.append(sent.sent_id)
                 continue
-            used_replacements.add(repl.sent_id)
             replacement_assignments[str(sent.sent_id)] = repl.sent_id
             out_blocks.append(repl.block)
         else:
@@ -268,8 +301,18 @@ def run(
             "after downloading the pool without --skip-pool."
         )
 
-    constructions = (only_construction,) if only_construction else _constructions()
-    doses = _dose_levels()
+    from collections import defaultdict
+
+    from drc.design import FULL_CORPUS_CODE, dose_cells
+
+    # The tiered design decides which (construction, dose) corpora to build; we
+    # group by construction so positives are located once each.
+    cells = dose_cells(config)
+    if only_construction:
+        cells = [(c, d) for (c, d) in cells if c == only_construction]
+    doses_by_construction: dict[str, list] = defaultdict(list)
+    for c, d in cells:
+        doses_by_construction[c].append(d)
 
     logger.info("Loading parsed corpus with trees from %s...", parsed_path)
     base_sentences = list(read_with_trees(parsed_path))
@@ -277,7 +320,16 @@ def run(
     pool = list(read_metadata(pool_parsed))
 
     sanity: dict[str, Any] = {}
-    for code in constructions:
+    for code, doses in doses_by_construction.items():
+        # The shared full-corpus model trains on the unfiltered corpus: write
+        # every sentence through untouched, no construction removed.
+        if code == FULL_CORPUS_CODE:
+            out_path = out_root / f"{code}_dose-all.conllu"
+            _write_full_corpus(base_sentences, out_path)
+            logger.info("Wrote shared full corpus -> %s (%d sentences).",
+                        out_path.name, len(base_sentences))
+            continue
+
         logger.info("Finding %s positives in base corpus...", code)
         positive_ids = find_positives(base_sentences, code)
         logger.info("%s: %d positives attested.", code, len(positive_ids))

@@ -19,6 +19,24 @@ bootstrap: resample residuals under the fitted curve, refit, repeat. That's
 slower than the curve_fit covariance but it doesn't lean on the asymptotic
 normality assumption, which is shaky with only five dose points.
 
+Tiered design (see ``drc.design``). The sweep no longer trains a full dose
+ladder for every construction:
+
+* **Core** constructions get the intermediate doses ``[0, 4, 16, 64]`` plus the
+  shared ceiling, so they have >= 4 dose points and we fit the full Hill curve
+  as before.
+* **Breadth** constructions get only ``{0, all}`` --- two points. Two points
+  can't pin down four Hill parameters, so we do NOT fit. Instead we record the
+  measured ``E0`` (dose-0 accuracy) and ``Emax`` (the shared-ceiling accuracy)
+  directly, leave ``E50``/``n`` as NaN, and set ``converged=False``. The
+  ``hill_fits.csv`` schema is unchanged; breadth rows just carry NaN where a fit
+  would have gone.
+
+The ceiling point for *every* construction comes from the one shared
+full-corpus model (``model_construction == "full"``, ``dose == "all"``),
+evaluated on that construction's minimal pairs. That row supplies the ``"all"``
+point of the series. See ``drc.design.emax_construction``.
+
 CLI::
 
     python -m drc.analysis.hill --config configs/base.yaml
@@ -32,8 +50,13 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from drc import CONSTRUCTIONS
 from drc.data.download import load_config, resolve_path
+from drc.design import (
+    all_constructions,
+    curve_doses,
+    emax_construction,
+    is_core,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps numpy/pandas lazy
     import numpy as np
@@ -48,7 +71,9 @@ N_BOOTSTRAP = 1000
 # Fallback attested counts for dose="all" when the sanity JSON is absent. These
 # are the corpus-wide totals recorded during dose generation; documented here so
 # a missing file degrades gracefully instead of crashing. Update alongside any
-# corpus regeneration.
+# corpus regeneration. Only the *core* constructions need a numeric "all" dose
+# (it's the x-position of the ceiling point in the curve fit); breadth
+# constructions are never fit, so a missing count for them is harmless.
 ATTESTED_ALL_COUNTS: dict[str, int] = {
     "aann": 1200,
     "comparative_correlative": 340,
@@ -76,18 +101,14 @@ def hill(D, E0, Emax, E50, n):
     return E0 + (Emax - E0) * Dn / (E50n + Dn)
 
 
-def resolve_dose_values(
-    df: pd.DataFrame, sanity_path: Path | None
-) -> pd.DataFrame:
-    """Replace the literal dose="all" with the construction's attested count.
+def load_all_counts(sanity_path: Path | None) -> dict[str, int]:
+    """Per-construction attested 'all' counts, from the sanity JSON or fallback.
 
-    Every other dose is already numeric. ``"all"`` means "every instance we
-    found in the corpus", and the actual number differs per construction, so we
-    look it up — from ``results/dose_corpora_sanity.json`` when it's there, and
-    from the documented fallback table when it isn't.
+    ``"all"`` means "every instance we found in the corpus", and the actual
+    number differs per construction. We read it from
+    ``results/dose_corpora_sanity.json`` when present, and from the documented
+    fallback table otherwise.
     """
-    import numpy as np
-
     counts = dict(ATTESTED_ALL_COUNTS)
     if sanity_path is not None and sanity_path.exists():
         with open(sanity_path, encoding="utf-8") as fh:
@@ -107,6 +128,22 @@ def resolve_dose_values(
             "No dose sanity JSON at %s; using documented fallback counts %s",
             sanity_path, counts,
         )
+    return counts
+
+
+def resolve_dose_values(
+    df: pd.DataFrame, sanity_path: Path | None
+) -> pd.DataFrame:
+    """Replace the literal dose="all" with the construction's attested count.
+
+    Every other dose is already numeric. ``"all"`` means "every instance we
+    found in the corpus", and the actual number differs per construction, so we
+    look it up — from ``results/dose_corpora_sanity.json`` when it's there, and
+    from the documented fallback table when it isn't.
+    """
+    import numpy as np
+
+    counts = load_all_counts(sanity_path)
 
     out = df.copy()
     numeric_dose = []
@@ -219,8 +256,103 @@ def fit_one(
     return row
 
 
-def fit_all(eval_csv: Path, sanity_path: Path | None, seed: int = 0) -> pd.DataFrame:
-    """Fit a Hill curve per (construction, seed) over the whole eval table."""
+def _empty_fit_row() -> dict[str, Any]:
+    """A fit row pre-filled with NaNs and ``converged=False``.
+
+    Used as the template for breadth constructions (no Hill fit) so every row in
+    ``hill_fits.csv`` carries the same columns regardless of tier.
+    """
+    import numpy as np
+
+    row: dict[str, Any] = dict.fromkeys(PARAM_NAMES, np.nan)
+    for p in PARAM_NAMES:
+        row[f"{p}_lo"] = np.nan
+        row[f"{p}_hi"] = np.nan
+    row["r_squared"] = np.nan
+    row["converged"] = False
+    return row
+
+
+def construction_series(
+    df: pd.DataFrame,
+    config: dict[str, Any],
+    cons: str,
+    seed: int,
+    counts: dict[str, int],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Assemble one construction's (dose_value, accuracy) series for a seed.
+
+    Walks the design's ``curve_doses`` for the construction. For every dose
+    except ``"all"`` it reads the self-eval row of that construction's own model
+    at that dose. For ``"all"`` it reads the *shared ceiling* model's row
+    (``model_construction == emax_construction(config, cons)``, i.e. ``"full"``)
+    evaluated on this construction. The numeric x-value of ``"all"`` is the
+    construction's attested count. Doses with no matching eval row are skipped.
+
+    The numeric ``"all"`` x-value is only meaningful for *core* constructions,
+    which we actually fit; for breadth constructions the curve is never fit, so
+    a missing attested count falls back to ``+inf`` (it keeps the ceiling last in
+    the sort and never feeds an optimiser).
+    """
+    import numpy as np
+
+    self_rows = df[(df["eval_construction"] == cons) & (df["seed"] == seed)]
+    ceiling_code = emax_construction(config, cons)
+    core = is_core(config, cons)
+    doses_x: list[float] = []
+    accs: list[float] = []
+    for dose in curve_doses(config, cons):
+        if str(dose).strip().lower() == "all":
+            row = self_rows[
+                (self_rows["model_construction"] == ceiling_code)
+                & (self_rows["dose"].astype(str).str.strip().str.lower() == "all")
+            ]
+            if row.empty:
+                logger.warning(
+                    "No ceiling row for %s (model_construction==%s, dose=all).",
+                    cons, ceiling_code,
+                )
+                continue
+            if cons not in counts:
+                if core:
+                    raise KeyError(
+                        f"No attested-'all' count for core construction '{cons}'. "
+                        "Add it to ATTESTED_ALL_COUNTS or the sanity JSON."
+                    )
+                doses_x.append(float("inf"))  # breadth: x unused, keep last
+            else:
+                doses_x.append(float(counts[cons]))
+            accs.append(float(row["accuracy"].iloc[0]))
+        else:
+            row = self_rows[
+                (self_rows["model_construction"] == cons)
+                & (self_rows["dose"].astype(str).str.strip() == str(dose))
+            ]
+            if row.empty:
+                continue
+            doses_x.append(float(dose))
+            accs.append(float(row["accuracy"].iloc[0]))
+    order = np.argsort(np.asarray(doses_x, dtype=float))
+    return (
+        np.asarray(doses_x, dtype=float)[order],
+        np.asarray(accs, dtype=float)[order],
+    )
+
+
+def fit_all(
+    eval_csv: Path,
+    sanity_path: Path | None,
+    config: dict[str, Any],
+    seed: int = 0,
+) -> pd.DataFrame:
+    """Build each construction's dose series and fit (core) or record (breadth).
+
+    Core constructions (>= 4 dose points) get the four-parameter Hill fit.
+    Breadth constructions (only dose 0 + the shared ceiling) can't be fit, so we
+    record their measured ``E0`` and ``Emax`` directly and leave ``E50``/``n``
+    NaN with ``converged=False``. The ceiling point for every construction comes
+    from the shared full-corpus model (see ``construction_series``).
+    """
     import numpy as np
     import pandas as pd
 
@@ -230,31 +362,35 @@ def fit_all(eval_csv: Path, sanity_path: Path | None, seed: int = 0) -> pd.DataF
         )
 
     df = pd.read_csv(eval_csv)
-    # Self-evaluation only: a construction's curve uses its own minimal pairs.
-    df = df[df["model_construction"] == df["eval_construction"]].copy()
-    df = resolve_dose_values(df, sanity_path)
+    counts = load_all_counts(sanity_path)
 
     rng = np.random.default_rng(seed)
     rows: list[dict[str, Any]] = []
-    for cons in CONSTRUCTIONS:
-        for s in sorted(df.loc[df["model_construction"] == cons, "seed"].unique()):
-            cell = df[(df["model_construction"] == cons) & (df["seed"] == s)]
-            cell = cell.sort_values("dose_value")
-            if len(cell) < len(PARAM_NAMES):
-                logger.warning(
-                    "Skipping %s seed %s: only %d dose points, need >= %d.",
-                    cons, s, len(cell), len(PARAM_NAMES),
-                )
+    for cons in all_constructions(config):
+        core = is_core(config, cons)
+        for s in sorted(df.loc[df["seed"].notna(), "seed"].astype(int).unique()):
+            D, Y = construction_series(df, config, cons, int(s), counts)
+            if D.size == 0:
                 continue
-            D = cell["dose_value"].to_numpy(dtype=float)
-            Y = cell["accuracy"].to_numpy(dtype=float)
-            fit = fit_one(D, Y, rng)
-            rows.append({"construction": cons, "seed": int(s), **fit})
+            if core:
+                if D.size < len(PARAM_NAMES):
+                    logger.warning(
+                        "Skipping core %s seed %s: only %d dose points, need >= %d.",
+                        cons, s, D.size, len(PARAM_NAMES),
+                    )
+                    continue
+                fit = fit_one(D, Y, rng)
+            else:
+                # Breadth: no fit. Record E0 (dose-0 accuracy) and Emax (ceiling).
+                fit = _empty_fit_row()
+                fit["E0"] = float(Y[0])
+                fit["Emax"] = float(Y[-1])
+            rows.append({"construction": cons, "seed": int(s), "is_core": core, **fit})
 
     if not rows:
         raise RuntimeError(
-            "No (construction, seed) cells had enough dose points to fit. "
-            "Check that the eval stage wrote all five dose levels."
+            "No (construction, seed) cells had a usable dose series. Check the "
+            "eval stage wrote per-dose rows and a model_construction=='full' row."
         )
     return pd.DataFrame(rows)
 
@@ -266,7 +402,7 @@ def run(config_path: Path, seed: int = 0) -> Path:
     eval_csv = results_dir / "eval_results.csv"
     sanity_path = results_dir / "dose_corpora_sanity.json"
 
-    fits = fit_all(eval_csv, sanity_path, seed=seed)
+    fits = fit_all(eval_csv, sanity_path, config, seed=seed)
 
     out_path = results_dir / "hill_fits.csv"
     out_path.parent.mkdir(parents=True, exist_ok=True)

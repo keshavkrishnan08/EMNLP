@@ -56,18 +56,16 @@ PILOT_SEED = 42
 SINGLE_GPU_DROP_DOSE = 4
 
 
-def _grid(drop_dose: Any | None = None) -> list[tuple[str, Any, int]]:
-    """Every ``(construction, dose, seed)`` triple, optionally dropping a dose."""
-    from drc import CONSTRUCTIONS, DOSE_LEVELS, SEEDS
+def _grid(config: dict[str, Any], drop_dose: Any | None = None) -> list[tuple[str, Any, int]]:
+    """The tiered set of runs from the design block (not a full factorial).
 
-    runs: list[tuple[str, Any, int]] = []
-    for construction in CONSTRUCTIONS:
-        for dose in DOSE_LEVELS:
-            if drop_dose is not None and dose == drop_dose:
-                continue
-            for seed in SEEDS:
-                runs.append((construction, dose, seed))
-    return runs
+    See ``drc.design``: every construction at dose 0, the full ladder for the
+    core subset, and one shared full-corpus model per seed. ``drop_dose`` trims
+    the core ladder for the single-GPU path.
+    """
+    from drc.design import run_cells
+
+    return run_cells(config, drop_dose=drop_dose)
 
 
 def _metrics_path(config: dict[str, Any], config_path: Path, run: tuple[str, Any, int]) -> Path:
@@ -231,10 +229,10 @@ def run_sweep(
     drop = SINGLE_GPU_DROP_DOSE if single_gpu else None
     if single_gpu:
         logger.info(
-            "Single-GPU mode: dropping dose=%s (60 -> 48 runs per the degradation plan).",
+            "Single-GPU mode: dropping core dose=%s to fit the session budget.",
             SINGLE_GPU_DROP_DOSE,
         )
-    grid = _grid(drop_dose=drop)
+    grid = _grid(config, drop_dose=drop)
 
     results_root = resolve_path(config_path, config["paths"]["results"])
     manifest_path = results_root / "sweep_manifest.json"

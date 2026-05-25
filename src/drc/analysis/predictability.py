@@ -1,42 +1,53 @@
 """Predict a construction's learnability from its corpus footprint — RQ4.
 
-The Hill fits hand us three readable numbers per construction: a floor ``E0``,
-a half-learning dose ``E50``, and a sharpness ``n``. The obvious next question
-is whether you could have *guessed* those numbers ahead of training, from cheap
-properties of how the construction shows up in the corpus. If E50 tracks, say,
-how lexically open a construction is, that's a learnability law in miniature —
-and as far as we can tell nobody's tried it. Prior work (WIDET/Oba 2024, the
-AANN line) measures exposure effects but never extracts a threshold, let alone
-predicts one.
+The headline target is now ``E0``, the indirect-evidence floor: how well a model
+handles a construction it never saw directly. ``E0`` exists for *all eight*
+constructions (it only needs the zero-dose model), where the threshold ``E50``
+exists only for the four *core* constructions whose full dose ladder we fit. So
+the main analysis predicts E0 across all eight, and E50 across the four core as
+a smaller secondary check. Both are exploratory.
 
-So we compute three predictors per construction, straight from the attested
-positives and corpus counts:
+**Pre-registered predictor set.** These four predictors, their definitions, and
+the choice of E0 as the headline target were fixed *before* looking at the
+fitted values — they're a-priori and, crucially, non-circular: none of them is
+the construction's own attested count dressed up. The headline predictors:
 
-* **attested_count** — how many positive instances the corpus holds. The raw
-  amount of evidence. Read from the dose sanity JSON's ``dose-all`` entry when
-  it's there, else the positives ``.jsonl`` line count.
+* **neighbor_density** — how much *structurally related but distinct* evidence
+  surrounds the construction. NON-CIRCULAR by construction: it is built only
+  from the OTHER constructions' positives, never this one's. We use a documented
+  lexical-overlap proxy: for each other construction we weight its attested
+  count by the Jaccard overlap between its content-token vocabulary and this
+  construction's, then sum. High when sibling constructions are both frequent
+  and lexically similar — a stand-in for "indirect evidence is nearby". (A POS
+  n-gram skeleton would be cleaner but needs a Stanza pass; the lexical proxy is
+  the cheap, documented approximation.)
 * **productivity** — type/token ratio of content-word lemmas across the
-  attested instances. A proxy for lexical openness: a construction that recurs
-  with the same few words is less "productive" than one that hosts a fresh
-  vocabulary each time. We approximate lemmas with lowercased whitespace tokens
-  minus a small stopword set (see ``_STOPWORDS``); a true lemmatiser would be
-  better but isn't worth a Stanza dependency for a four-point exploratory fit.
+  construction's own attested instances. A proxy for lexical openness: a
+  construction that recurs with the same few words is less "productive" than one
+  that hosts a fresh vocabulary each time. Lemmas are approximated with
+  lowercased whitespace tokens minus a small stopword set (see ``_STOPWORDS``).
 * **surface_predictability** — mean per-token unigram log-prob of the attested
-  instances under a unigram model built from those same instances. Higher means
-  the construction lives in high-frequency, easy-to-anticipate words. We reuse
+  instances under a unigram model built from those same instances (n-gram
+  surface recoverability). Higher means the construction lives in
+  high-frequency, easy-to-anticipate words. Reuses
   ``drc.eval.slor.build_unigram_counts`` / ``unigram_logprob`` so the units
   match the SLOR pipeline exactly.
 
-Then we join with the Hill fits and correlate each predictor against E50, E0,
-and n — Spearman *and* Pearson, because with four points a single outlier can
-flip Pearson while Spearman holds.
+* **attested_count** — how many positive instances the corpus holds. Kept as a
+  SEPARATE predictor, expected to be weak and explicitly NOT the headline; it's
+  the raw-exposure baseline the others should beat. Read from the dose sanity
+  JSON's ``dose-all`` entry when present, else the positives ``.jsonl`` line
+  count.
+
+Then we join with E0 (all eight) and E50 (four core) and correlate each
+predictor against each — Spearman *and* Pearson, because with so few points a
+single outlier can flip Pearson while Spearman holds.
 
 A loud honesty caveat, baked into the output and the logs: **there are only
-four constructions.** Three seeds each gives twelve rows, but those are
-pseudo-replicates, not independent constructions — the predictors are identical
-within a construction. We report correlations at the construction level (n=4)
-and flag the whole thing as a proof-of-concept, not an established law. Treat
-the p-values as decoration.
+eight constructions, four of them core.** Seeds give more rows, but those are
+pseudo-replicates — the predictors are identical within a construction. We
+correlate at the construction level (n=8 for E0, n=4 for E50) and flag the whole
+thing as exploratory, not an established law. Treat the p-values as decoration.
 
 CLI::
 
@@ -52,20 +63,29 @@ from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from drc import CONSTRUCTIONS
 from drc.data.download import load_config, resolve_path
+from drc.design import all_constructions
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps pandas lazy
     import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# The Hill parameters we try to predict. E50 is the headline (how much data the
-# construction needs); E0 and n come along because they're cheap to report.
-TARGETS = ("E50", "E0", "n")
+# Targets we try to predict, with the construction set each is defined over.
+# E0 (the indirect-evidence floor) is the headline and exists for ALL eight
+# constructions; E50 exists only for the four core ones whose ladder we fit.
+TARGET_SCOPES = {"E0": "all", "E50": "core"}
+TARGETS = tuple(TARGET_SCOPES)
 
-# Predictor columns, in the order they're written and correlated.
-PREDICTORS = ("attested_count", "productivity", "surface_predictability")
+# Pre-registered predictor columns, in the order they're written and correlated.
+# neighbor_density is the headline (non-circular, sibling-only); attested_count
+# trails as the deliberately-weak raw-exposure baseline.
+PREDICTORS = (
+    "neighbor_density",
+    "productivity",
+    "surface_predictability",
+    "attested_count",
+)
 
 # A deliberately tiny closed-class stopword list. The productivity ratio is
 # meant to capture *content*-word openness, so we strip the function words that
@@ -174,16 +194,51 @@ def _attested_count_from_sanity(sanity: dict[str, Any], cons: str) -> int | None
     return None
 
 
+def _jaccard(a: set[str], b: set[str]) -> float:
+    """Jaccard overlap of two token-vocabulary sets; 0 when both empty."""
+    if not a and not b:
+        return 0.0
+    inter = len(a & b)
+    union = len(a | b)
+    return inter / union if union else 0.0
+
+
+def _neighbor_density(
+    cons: str,
+    vocab: dict[str, set[str]],
+    counts: dict[str, int],
+) -> float:
+    """Structurally-related-but-distinct evidence around ``cons``. NON-CIRCULAR.
+
+    Built only from the OTHER constructions: sum over each other construction of
+    (its attested count) x (Jaccard overlap of its content vocabulary with this
+    construction's). The target construction's own count never enters, so this
+    can't collapse into ``attested_count``. High when sibling constructions are
+    both frequent and lexically similar — the documented proxy for "indirect
+    evidence is nearby".
+    """
+    me = vocab.get(cons, set())
+    total = 0.0
+    for other, vec in vocab.items():
+        if other == cons:
+            continue
+        total += counts.get(other, 0) * _jaccard(me, vec)
+    return float(total)
+
+
 def compute_predictors(
-    filtered_dir: Path, sanity_path: Path | None
+    filtered_dir: Path,
+    sanity_path: Path | None,
+    config: dict[str, Any],
 ) -> pd.DataFrame:
     """Build the per-construction predictor table from the attested positives.
 
-    One row per construction, columns ``attested_count``, ``productivity``,
-    ``surface_predictability``. Each predictor is computed from that
-    construction's own positives so the three numbers describe the same set of
-    sentences. Raises if a positives file is missing — better a clear stop than
-    a silently short table.
+    One row per construction (all eight), with the pre-registered predictor
+    columns. ``productivity`` and ``surface_predictability`` come from the
+    construction's own positives; ``neighbor_density`` is built only from the
+    OTHER constructions (non-circular); ``attested_count`` is the raw-exposure
+    baseline. Raises if a positives file is missing — better a clear stop than a
+    silently short table.
     """
     import pandas as pd
 
@@ -199,19 +254,33 @@ def compute_predictors(
             sanity_path,
         )
 
-    rows: list[dict[str, Any]] = []
-    for cons in CONSTRUCTIONS:
+    constructions = all_constructions(config)
+
+    # First pass: read positives, compute per-construction own-vocabulary and
+    # attested counts. neighbor_density needs every construction's vocab, so it's
+    # computed in a second pass once they're all in hand.
+    texts_by: dict[str, list[str]] = {}
+    vocab_by: dict[str, set[str]] = {}
+    count_by: dict[str, int] = {}
+    for cons in constructions:
         texts = _read_positive_texts(_positives_path(filtered_dir, cons))
         if not texts:
             raise RuntimeError(
                 f"No attested instances read for '{cons}'. The positives file is "
                 "empty; can't compute predictors."
             )
-
-        # attested_count: prefer the audited corpus total, else how many we read.
+        texts_by[cons] = texts
+        toks: list[str] = []
+        for t in texts:
+            toks.extend(_content_tokens(t))
+        vocab_by[cons] = set(toks)
         n_attested = _attested_count_from_sanity(sanity, cons)
-        if n_attested is None:
-            n_attested = len(texts)
+        count_by[cons] = int(n_attested) if n_attested is not None else len(texts)
+
+    rows: list[dict[str, Any]] = []
+    for cons in constructions:
+        texts = texts_by[cons]
+        n_attested = count_by[cons]
 
         # productivity: type/token ratio over content lemmas, pooled across all
         # instances. Ranges (0, 1]; near 1 means almost no lexical repetition.
@@ -231,18 +300,23 @@ def compute_predictors(
             per_sent.append(unigram_logprob(t, counts) / n_words)
         surface_predictability = float(sum(per_sent) / len(per_sent))
 
+        # neighbor_density: sibling-only, non-circular (see _neighbor_density).
+        neighbor_density = _neighbor_density(cons, vocab_by, count_by)
+
         rows.append(
             {
                 "construction": cons,
-                "attested_count": int(n_attested),
+                "neighbor_density": neighbor_density,
                 "productivity": float(productivity),
                 "surface_predictability": surface_predictability,
+                "attested_count": int(n_attested),
                 "n_instances_read": len(texts),
             }
         )
         logger.info(
-            "%s: count=%d productivity=%.3f surface=%.3f (from %d instances)",
-            cons, n_attested, productivity, surface_predictability, len(texts),
+            "%s: neighbor=%.2f productivity=%.3f surface=%.3f count=%d (from %d)",
+            cons, neighbor_density, productivity, surface_predictability,
+            n_attested, len(texts),
         )
 
     return pd.DataFrame(rows)
@@ -270,21 +344,40 @@ def _unigram_from_texts(texts: list[str], build_unigram_counts) -> Counter[str]:
 
 
 def _construction_level_targets(hill_fits: pd.DataFrame) -> pd.DataFrame:
-    """Mean (and std) of each Hill target per construction, over seeds.
+    """Mean (and std) of each target per construction, over seeds.
 
     We collapse seeds to one row per construction because the predictors are
     constant within a construction — correlating at the seed level would just
     inflate n with copies. The std comes along so the figure can draw error bars.
-    """
-    good = hill_fits[hill_fits["converged"].astype(bool)] if "converged" in hill_fits else hill_fits
-    if good.empty:
-        raise RuntimeError("No converged Hill fits to correlate against.")
 
-    agg: dict[str, Any] = {}
+    Each target is aggregated over rows where it is finite. That matters for the
+    tiered design: ``E0`` exists for all eight constructions (breadth rows carry
+    it even though their Hill fit didn't converge), while ``E50`` is NaN for
+    breadth and so collapses to the four core constructions on its own. We do
+    NOT pre-filter to ``converged`` here — that would throw away breadth E0.
+    """
+    import numpy as np
+
+    if hill_fits.empty:
+        raise RuntimeError("No Hill-fit rows to correlate against.")
+
+    frames: list[pd.DataFrame] = []
     for t in TARGETS:
-        agg[f"{t}_mean"] = (t, "mean")
-        agg[f"{t}_std"] = (t, "std")
-    out = good.groupby("construction").agg(**agg).reset_index()
+        if t not in hill_fits:
+            continue
+        sub = hill_fits[np.isfinite(hill_fits[t].astype(float))]
+        if sub.empty:
+            continue
+        agg = sub.groupby("construction")[t].agg(["mean", "std"]).reset_index()
+        agg = agg.rename(columns={"mean": f"{t}_mean", "std": f"{t}_std"})
+        frames.append(agg)
+
+    if not frames:
+        raise RuntimeError("No finite target values to correlate against.")
+
+    out = frames[0]
+    for f in frames[1:]:
+        out = out.merge(f, on="construction", how="outer")
     return out
 
 
@@ -296,8 +389,9 @@ def correlate(
     Returns ``(merged, correlations)``. ``merged`` is the construction-level
     table (predictors + mean/std targets). ``correlations`` has one row per
     (predictor, target) pair with Spearman and Pearson coefficients, their
-    p-values, and the sample size ``n`` — which here is the number of
-    constructions, four, and is meant to be read as a warning label.
+    p-values, and ``n_constructions`` — the number of constructions the target
+    is defined over (eight for E0, four for E50), meant to be read as a warning
+    label. Every row is flagged ``exploratory_only``.
     """
     import numpy as np
     import pandas as pd
@@ -305,17 +399,17 @@ def correlate(
 
     targets = _construction_level_targets(hill_fits)
     merged = predictors.merge(targets, on="construction", how="inner")
-    n = len(merged)
-    if n < 3:
-        raise RuntimeError(
-            f"Only {n} constructions after the join; need >= 3 for a correlation."
-        )
+    if merged.empty:
+        raise RuntimeError("No constructions matched between predictors and fits.")
 
     rows: list[dict[str, Any]] = []
     for pred in PREDICTORS:
         x = merged[pred].to_numpy(dtype=float)
         for t in TARGETS:
-            y = merged[f"{t}_mean"].to_numpy(dtype=float)
+            col = f"{t}_mean"
+            if col not in merged:
+                continue
+            y = merged[col].to_numpy(dtype=float)
             mask = np.isfinite(x) & np.isfinite(y)
             if mask.sum() < 3 or np.ptp(x[mask]) == 0 or np.ptp(y[mask]) == 0:
                 sr = sp = pr = pp = float("nan")
@@ -326,6 +420,7 @@ def correlate(
                 {
                     "predictor": pred,
                     "target": t,
+                    "target_scope": TARGET_SCOPES.get(t, "all"),
                     "n_constructions": int(mask.sum()),
                     "spearman_r": float(sr),
                     "spearman_p": float(sp),
@@ -338,10 +433,10 @@ def correlate(
     return merged, correlations
 
 
-def _strongest_predictor(correlations: pd.DataFrame, target: str = "E50") -> str:
+def _strongest_predictor(correlations: pd.DataFrame, target: str = "E0") -> str:
     """The predictor with the largest |Spearman r| against ``target``.
 
-    Spearman because it's the rank measure that survives a four-point fit best.
+    Spearman because it's the rank measure that survives a tiny sample best.
     Ties and all-NaN rows fall back to the first predictor so the figure always
     has something to draw.
     """
@@ -357,14 +452,14 @@ def fig6_predictability(
     merged: pd.DataFrame,
     correlations: pd.DataFrame,
     out_path: Path,
-    target: str = "E50",
+    target: str = "E0",
 ) -> None:
-    """Scatter E50 against its strongest predictor, one point per construction.
+    """Scatter ``target`` against its strongest predictor, one point per construction.
 
-    Points are construction means; vertical error bars are the seed std of the
-    target. We label each point and drop the Spearman r in the corner so the
-    figure carries its own honesty caveat. Okabe-Ito colours, one per
-    construction, matching the rest of the figure set.
+    Defaults to the headline target ``E0`` (across all eight constructions).
+    Points are construction means; vertical error bars are the seed std. We
+    label each point and drop the Spearman r in the corner so the figure carries
+    its own honesty caveat. Okabe-Ito colours, matching the rest of the figures.
     """
     import matplotlib.pyplot as plt
     import numpy as np
@@ -372,22 +467,24 @@ def fig6_predictability(
     # Local import to avoid a hard figures.py dependency at module import time.
     from drc.analysis.figures import (
         DISPLAY_NAMES,
+        OKABE_ITO,
         _apply_minimal_theme,
-        _color_for,
     )
 
     pred = _strongest_predictor(correlations, target=target)
     fig, ax = plt.subplots(figsize=(6.5, 5.5))
 
-    for _, row in merged.iterrows():
+    plotted = merged[np.isfinite(merged[f"{target}_mean"].astype(float))]
+    for i, (_, row) in enumerate(plotted.iterrows()):
         cons = row["construction"]
+        color = OKABE_ITO[i % len(OKABE_ITO)]
         x = float(row[pred])
         y = float(row[f"{target}_mean"])
         yerr = float(row.get(f"{target}_std", float("nan")))
         yerr = 0.0 if not np.isfinite(yerr) else yerr
         ax.errorbar(
             x, y, yerr=yerr, fmt="o", markersize=10,
-            color=_color_for(cons), ecolor=_color_for(cons),
+            color=color, ecolor=color,
             elinewidth=1.2, capsize=4, markeredgecolor="black",
             markeredgewidth=0.5,
         )
@@ -399,20 +496,24 @@ def fig6_predictability(
     corr_row = correlations[
         (correlations["predictor"] == pred) & (correlations["target"] == target)
     ]
+    n_pts = int(len(plotted))
     if not corr_row.empty:
         sr = corr_row.iloc[0]["spearman_r"]
         pr = corr_row.iloc[0]["pearson_r"]
         ax.text(
             0.02, 0.98,
-            f"Spearman r = {sr:.2f}\nPearson r = {pr:.2f}\n(n = 4, exploratory)",
+            f"Spearman r = {sr:.2f}\nPearson r = {pr:.2f}\n(n = {n_pts}, exploratory)",
             transform=ax.transAxes, va="top", ha="left", fontsize=8,
             bbox={"boxstyle": "round", "fc": "white", "ec": "grey", "alpha": 0.8},
         )
 
     pretty = pred.replace("_", " ")
     ax.set_xlabel(f"{pretty} (corpus predictor)")
-    ax.set_ylabel(r"$E_{50}$ (mean over seeds)" if target == "E50" else f"{target} (mean over seeds)")
-    ax.set_title(f"Predicting {target} from corpus properties (proof of concept)")
+    ylabel = r"$E_0$ (mean over seeds)" if target == "E0" else (
+        r"$E_{50}$ (mean over seeds)" if target == "E50" else f"{target} (mean over seeds)"
+    )
+    ax.set_ylabel(ylabel)
+    ax.set_title(f"Predicting {target} from corpus properties (exploratory)")
     _apply_minimal_theme(ax)
 
     fig.tight_layout()
@@ -436,7 +537,7 @@ def run(config_path: Path) -> dict[str, Path]:
             f"Hill fits not found at {hill_csv}. Run `python -m drc.analysis.hill` first."
         )
 
-    predictors = compute_predictors(filtered_dir, sanity_path)
+    predictors = compute_predictors(filtered_dir, sanity_path, config)
     hill_fits = pd.read_csv(hill_csv)
     merged, correlations = correlate(predictors, hill_fits)
 

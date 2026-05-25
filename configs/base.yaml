@@ -52,6 +52,27 @@ data:
   strict_small_repo: BabyLM-community/BabyLM-2026-Strict-Small   # the 10M train set
   strict_repo: BabyLM-community/BabyLM-2026-Strict               # 100M set -> replacement pool
 
+# Tiered experiment design (NOT a full factorial). See src/drc/design.py.
+# E0 is measured for every construction (dose 0); the full dose ladder is fit
+# only for the `core` subset; one shared full-corpus model per seed is the
+# ceiling (E_max) for all. This holds 8 constructions at ~the cost of the old
+# naive 4x5x3 grid. Run count = len(drc.design.run_cells(config)).
+design:
+  core_constructions:                 # full dose-response curve (+ shared E_max)
+    - aann
+    - comparative_correlative
+    - tough_movement
+    - resultative
+  breadth_constructions:              # E0 (dose 0) only, for the indirect-evidence index
+    - existential_there
+    - it_cleft
+    - negative_inversion
+    - subject_to_object_raising
+  core_doses: [0, 4, 16, 64]          # intermediate counts; "all" comes from the shared model
+  breadth_doses: [0]
+  seeds: [42, 43, 44]
+  shared_full_corpus: true            # train the unfiltered-corpus model once per seed
+
 paths:
   raw_corpus: data/raw/babylm_10M.txt          # downloaded corpus: domain<TAB>text per line
   replacement_pool: data/raw/babylm_100M_pool.txt

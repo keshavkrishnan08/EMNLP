@@ -6,12 +6,16 @@ import drc
 from drc.data.filters import FILTERS, get_filter
 
 
-def test_constructions_are_the_four_expected_codes():
+def test_constructions_are_the_expected_codes():
     assert drc.CONSTRUCTIONS == (
         "aann",
         "comparative_correlative",
         "tough_movement",
         "resultative",
+        "existential_there",
+        "it_cleft",
+        "negative_inversion",
+        "subject_to_object_raising",
     )
 
 

@@ -153,3 +153,148 @@ def test_resultative_rejects_verb_with_only_object(make_sentence_fixture):
         ]
     )
     assert not bool(resultative(sent))
+
+
+# --- Existential there: expletive there + BE + nominal pivot ---------------
+
+def test_existential_there_matches_there_are_three_cats(make_sentence_fixture):
+    """'there are three cats' is the expletive-there + BE + pivot frame."""
+    et = get_filter("existential_there")
+    sent = make_sentence_fixture(
+        [
+            ("there", "PRON", "there", None, "expl", 2),
+            ("are", "AUX", "be", "Number=Plur|VerbForm=Fin", "root", 0),
+            ("three", "NUM", "three", "NumType=Card", "nummod", 4),
+            ("cats", "NOUN", "cat", "Number=Plur", "nsubj", 2),
+            ("on", "ADP", "on", None, "case", 7),
+            ("the", "DET", "the", "Definite=Def", "det", 7),
+            ("mat", "NOUN", "mat", "Number=Sing", "obl", 2),
+        ]
+    )
+    result = et(sent)
+    assert bool(result)
+    # there (idx 0) + be (idx 1) + pivot head 'three' (idx 2): a three-token frame.
+    assert result.span == (0, 3)
+
+
+def test_existential_there_rejects_locative_there(make_sentence_fixture):
+    """'put it there' — sentence-final locative 'there', no existential frame."""
+    et = get_filter("existential_there")
+    sent = make_sentence_fixture(
+        [
+            ("put", "VERB", "put", "VerbForm=Fin", "root", 0),
+            ("it", "PRON", "it", "Person=3", "obj", 1),
+            ("there", "ADV", "there", None, "advmod", 1),
+        ]
+    )
+    assert not bool(et(sent))
+
+
+# --- It-cleft: it + BE + focus XP + relativizer ----------------------------
+
+def test_it_cleft_matches_it_was_the_dog_that_barked(make_sentence_fixture):
+    """'it was the dog that barked' is the canonical it-cleft."""
+    cleft = get_filter("it_cleft")
+    sent = make_sentence_fixture(
+        [
+            ("it", "PRON", "it", "Person=3", "nsubj", 4),
+            ("was", "AUX", "be", "VerbForm=Fin", "cop", 4),
+            ("the", "DET", "the", "Definite=Def", "det", 4),
+            ("dog", "NOUN", "dog", "Number=Sing", "root", 0),
+            ("that", "PRON", "that", "PronType=Rel", "nsubj", 6),
+            ("barked", "VERB", "bark", "VerbForm=Fin", "acl:relcl", 4),
+        ]
+    )
+    result = cleft(sent)
+    assert bool(result)
+    # Spans from clause-initial 'it' (idx 0) through the relativizer 'that' (idx 4).
+    assert result.span == (0, 5)
+
+
+def test_it_cleft_rejects_subject_aux_question(make_sentence_fixture):
+    """'was it the dog that barked' is a question — 'it' isn't clause-initial."""
+    cleft = get_filter("it_cleft")
+    sent = make_sentence_fixture(
+        [
+            ("was", "AUX", "be", "VerbForm=Fin", "cop", 4),
+            ("it", "PRON", "it", "Person=3", "nsubj", 4),
+            ("the", "DET", "the", "Definite=Def", "det", 4),
+            ("dog", "NOUN", "dog", "Number=Sing", "root", 0),
+            ("that", "PRON", "that", "PronType=Rel", "nsubj", 6),
+            ("barked", "VERB", "bark", "VerbForm=Fin", "acl:relcl", 4),
+        ]
+    )
+    assert not bool(cleft(sent))
+
+
+# --- Negative inversion: fronted negative adverbial + subject-aux inversion -
+
+def test_negative_inversion_matches_never_have_I_seen(make_sentence_fixture):
+    """'never have I seen ...' fronts 'never' and inverts subject and aux."""
+    neg = get_filter("negative_inversion")
+    sent = make_sentence_fixture(
+        [
+            ("never", "ADV", "never", None, "advmod", 4),
+            ("have", "AUX", "have", "VerbForm=Fin", "aux", 4),
+            ("I", "PRON", "I", "Person=1", "nsubj", 4),
+            ("seen", "VERB", "see", "VerbForm=Part", "root", 0),
+            ("such", "DET", "such", None, "det", 6),
+            ("messes", "NOUN", "mess", "Number=Plur", "obj", 4),
+        ]
+    )
+    result = neg(sent)
+    assert bool(result)
+    # 'never' (idx 0) + aux 'have' (idx 1) + subject 'I' (idx 2): a three-token frame.
+    assert result.span == (0, 3)
+
+
+def test_negative_inversion_rejects_uninverted_order(make_sentence_fixture):
+    """'never I have seen ...' keeps the subject before the aux — not inverted."""
+    neg = get_filter("negative_inversion")
+    sent = make_sentence_fixture(
+        [
+            ("never", "ADV", "never", None, "advmod", 4),
+            ("I", "PRON", "I", "Person=1", "nsubj", 4),
+            ("have", "AUX", "have", "VerbForm=Fin", "aux", 4),
+            ("seen", "VERB", "see", "VerbForm=Part", "root", 0),
+            ("such", "DET", "such", None, "det", 6),
+            ("messes", "NOUN", "mess", "Number=Plur", "obj", 4),
+        ]
+    )
+    assert not bool(neg(sent))
+
+
+# --- Subject-to-object raising: ECM verb + NP + to + VERB ------------------
+
+def test_subject_to_object_raising_matches_believed_him_to_be(make_sentence_fixture):
+    """'they believed him to be guilty' is the ECM / raising-to-object frame."""
+    raising = get_filter("subject_to_object_raising")
+    sent = make_sentence_fixture(
+        [
+            ("they", "PRON", "they", "Person=3", "nsubj", 2),
+            ("believed", "VERB", "believe", "VerbForm=Fin", "root", 0),
+            ("him", "PRON", "he", "Case=Acc", "obj", 2),
+            ("to", "PART", "to", None, "mark", 5),
+            ("be", "AUX", "be", "VerbForm=Inf", "xcomp", 2),
+            ("guilty", "ADJ", "guilty", "Degree=Pos", "xcomp", 2),
+        ]
+    )
+    result = raising(sent)
+    assert bool(result)
+    # verb 'believed' (idx 1) through embedded 'be' (idx 4).
+    assert result.span == (1, 5)
+
+
+def test_subject_to_object_raising_rejects_missing_to(make_sentence_fixture):
+    """'they believed him be guilty' drops the infinitival 'to' — ungrammatical."""
+    raising = get_filter("subject_to_object_raising")
+    sent = make_sentence_fixture(
+        [
+            ("they", "PRON", "they", "Person=3", "nsubj", 2),
+            ("believed", "VERB", "believe", "VerbForm=Fin", "root", 0),
+            ("him", "PRON", "he", "Case=Acc", "obj", 2),
+            ("be", "AUX", "be", "VerbForm=Inf", "xcomp", 2),
+            ("guilty", "ADJ", "guilty", "Degree=Pos", "xcomp", 2),
+        ]
+    )
+    assert not bool(raising(sent))

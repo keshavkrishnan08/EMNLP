@@ -35,3 +35,37 @@ resultative:
   eval_items: evaluation/eval_items/resultative.jsonl
   # Argument-structure construction; predicts high seed variance.
   hypothesized_cluster: argument_structure
+
+# --- Breadth constructions for the indirect-evidence (E0) study --------------
+
+existential_there:
+  name: "Existential there (there is/are NP)"
+  example: "there are three cats on the mat"
+  expected_count: [8000, 20000]
+  eval_items: evaluation/eval_items/existential_there.jsonl
+  # Very frequent, fully productive; predicts an early, near-flat saturation.
+  hypothesized_cluster: frequent_productive
+
+it_cleft:
+  name: "It-cleft (it BE XP that/who ...)"
+  example: "it was the dog that barked"
+  expected_count: [1500, 4000]
+  eval_items: evaluation/eval_items/it_cleft.jsonl
+  # Information-structural frame; moderate frequency, smooth transition.
+  hypothesized_cluster: information_structure
+
+negative_inversion:
+  name: "Negative inversion (never have I seen ...)"
+  example: "never have I seen such a mess"
+  expected_count: [300, 800]
+  eval_items: evaluation/eval_items/negative_inversion.jsonl
+  # Rare, register-marked subject-aux inversion; predicts a sharp, late rise.
+  hypothesized_cluster: rare_register_marked
+
+subject_to_object_raising:
+  name: "Subject-to-object raising / ECM (I believe him to be honest)"
+  example: "they believed him to be guilty"
+  expected_count: [600, 1500]
+  eval_items: evaluation/eval_items/subject_to_object_raising.jsonl
+  # Lexically governed argument structure; predicts moderate Hill n, high E0.
+  hypothesized_cluster: argument_structure

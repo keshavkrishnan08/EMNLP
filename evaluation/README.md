@@ -16,7 +16,7 @@ Each object uses this exact set of fields:
 | Field | Type | Meaning |
 |---|---|---|
 | `item_id` | string | Unique ID, prefixed by construction (e.g. `aann_001`). |
-| `construction` | string | One of `aann`, `comparative_correlative`, `tough_movement`, `resultative`. |
+| `construction` | string | One of `aann`, `comparative_correlative`, `tough_movement`, `resultative`, `existential_there`, `it_cleft`, `negative_inversion`, `subject_to_object_raising`. |
 | `good_sentence` | string | The grammatical member containing the target construction. |
 | `bad_sentence` | string | The minimally different ungrammatical / less-acceptable member. |
 | `minimal_pair_type` | string | What was manipulated to make the bad member (see per-construction values below). |

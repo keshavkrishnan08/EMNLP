@@ -89,11 +89,15 @@ the number of times a target construction appears, dosed at 0, 4, 16, 64,
 and every attested instance. Train an LTG-BERT model from scratch at each
 dose, measure acceptability with a syntactic log-odds-ratio (SLOR) score
 on minimal pairs, and you can fit a dose-response curve and read off
-interpretable parameters --- a floor with zero exposure, a ceiling, a
-half-saturation dose, and a steepness that tells smooth scaling apart from
-a sharp threshold. We run this across four constructions (AANN, the
-comparative correlative, tough-movement, and the resultative) and three
-random seeds, giving 60 models in a single frozen training recipe.
+interpretable parameters. The floor at zero exposure, \Ezero, is the
+quantity we care about most: a direct, per-construction measure of how much
+of a construction is learnable from \emph{indirect} evidence alone, turning
+the filtered-corpus debate into a number. The half-saturation dose \Efifty{}
+and the steepness \hilln{} then say how much direct evidence the rest takes
+and whether it arrives smoothly or at a threshold. We use a tiered design to
+keep this affordable: eight constructions get \Ezero{} (zero-dose), four of
+them get the full dose ladder, and one shared full-corpus model per seed
+supplies the ceiling --- 63 models in a single frozen recipe.
 We pre-registered five hypotheses and the rules that pick between them.
 \resultpending{which hypothesis fired and its one-line summary}
 \resultpending{headline dose-response finding: mean Hill coefficient and
@@ -153,16 +157,24 @@ domain-matched sentences from a 100M-word pool, so corpus size and genre
 mix stay constant while only the construction count moves. We then train
 LTG-BERT \citep{samuel2023ltgbert} from scratch at each dose with one
 frozen recipe, holding architecture, optimizer, and schedule identical
-across all 60 runs. Tuning per dose would just invite worries about
+across all runs. Tuning per dose would just invite worries about
 p-hacking; freezing the recipe is what keeps the comparison honest.
 
-We study four constructions chosen to span the space: AANN (productive but
-rare), the comparative correlative (semi-idiomatic;
-\citealp{weissweiler2022comparative}), tough-movement (a classic
-poverty-of-stimulus case; \citealp{hu2020syntaxgym}), and the resultative
-(an argument-structure construction; \citealp{goldberg2004resultatives}).
-Three random seeds per cell let seed-to-seed spread become a real
-distribution rather than a footnote.
+We deliberately avoid a full factorial. The floor \Ezero{} --- our headline
+--- needs only the zero-dose model plus a ceiling, so we measure it
+\emph{broadly}: eight constructions are trained at zero exposure. Four
+\emph{core} constructions also get the full dose ladder, so we can fit the
+curve and read off \Efifty{} and \hilln; these span the space from
+productive-but-rare AANN through the semi-idiomatic comparative correlative
+\citep{weissweiler2022comparative}, the poverty-of-stimulus case of
+tough-movement \citep{hu2020syntaxgym}, to the argument-structure resultative
+\citep{goldberg2004resultatives}. The other four (existential \emph{there},
+it-clefts, negative inversion, and ECM raising) broaden the range of
+\Ezero{} we observe. One shared full-corpus model per seed supplies the
+ceiling for everyone --- at dose ``all'' the corpus is just the unfiltered
+corpus, so training it once rather than per construction is what buys the
+breadth. Three seeds per cell make seed spread a real distribution. The whole
+design is 63 models.
 
 Crucially, we locked our analysis before seeing any fitted numbers. Five
 hypotheses --- smooth scaling, phase transition, heterogeneous regimes,
@@ -180,7 +192,7 @@ Our contributions:
         indirect-evidence floor (\Ezero) that are comparable across
         constructions --- turning the qualitative exposure curves of prior
         work \citep{oba2024widet} into quantitative estimates, on a frozen
-        60-run design.
+        63-run tiered design.
   \item Three analyses the dosing design makes possible and that prior work
         has not run: predicting \Efifty{} from corpus properties
         (Section~\ref{sec:predictability}), a cross-construction
@@ -232,7 +244,7 @@ fully productive to frozen and idiomatic
 \citep{goldberg1995constructions,goldberg2004resultatives,tomasello2003constructing}.
 This contrasts with a poverty-of-stimulus framing on which core grammar is
 underdetermined by the input \citep{chomsky1965aspects}, a debate that
-language models have reopened \citep{lan2026llmsps}. The four targets here
+language models have reopened \citep{lan2026llmsps}. The core targets here
 have established linguistic analyses and existing probes
 \citep{weissweiler2022comparative,hu2020syntaxgym,goldberg2004resultatives,mahowald2023aann}.
 Work comparing model and child learning stages motivates treating exposure
@@ -268,7 +280,7 @@ LMs.
 \label{sec:methods}
 
 Everything in this section is fixed by design and does not depend on
-results. The recipe is frozen across all 60 runs.
+results. The recipe is frozen across all runs.
 
 \subsection{Construction selection}
 \label{sec:methods-constructions}
@@ -600,7 +612,7 @@ from results/decision.txt}
 A single saturating law would describe construction learning: competence
 rises gradually and predictably with exposure, and the half-saturation
 dose \Efifty{} becomes a usable ``data budget'' per construction.
-\resultpending{quantify and contrast \Efifty{} across the four constructions}
+\resultpending{quantify and contrast \Efifty{} across the core constructions}
 
 \paragraph{If H2 (phase transition) fired.}
 % Hill wins everywhere but mean n > 4: grammatical grokking.
@@ -635,7 +647,7 @@ look more like a coin flip on initialization than a function of exposure.
 We framed construction learning as a dose-response problem, fit
 interpretable Hill curves to acceptability as a function of pretraining
 exposure, and pre-registered the rule that interprets them. The design ---
-a frozen 60-run sweep with matched-replacement dose corpora --- isolates
+a frozen 63-model tiered sweep with matched-replacement dose corpora --- isolates
 exposure from corpus size and genre. \resultpending{one-sentence takeaway
 once the decision rule has fired}
 

@@ -16,7 +16,11 @@ from ... import CONSTRUCTIONS
 from .aann import aann
 from .base import ConstructionFilter, FilterMatch
 from .comparative_correlative import comparative_correlative
+from .existential_there import existential_there
+from .it_cleft import it_cleft
+from .negative_inversion import negative_inversion
 from .resultative import resultative
+from .subject_to_object_raising import subject_to_object_raising
 from .tough_movement import tough_movement
 
 # Code -> filter instance. Keys must match the canonical short codes exactly.
@@ -25,6 +29,10 @@ FILTERS: dict[str, ConstructionFilter] = {
     comparative_correlative.code: comparative_correlative,
     tough_movement.code: tough_movement,
     resultative.code: resultative,
+    existential_there.code: existential_there,
+    it_cleft.code: it_cleft,
+    negative_inversion.code: negative_inversion,
+    subject_to_object_raising.code: subject_to_object_raising,
 }
 
 # Fail loud if the registry and the canonical code list ever diverge.
