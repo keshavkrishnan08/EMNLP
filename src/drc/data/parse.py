@@ -155,7 +155,7 @@ def parse_corpus(
     out_path: Path,
     force: bool = False,
     use_gpu: bool = False,
-    batch_size: int = 32,
+    doc_batch: int = 128,
 ) -> Path:
     """Parse ``raw_path`` to CoNLL-U at ``out_path``, caching aggressively.
 
@@ -176,6 +176,7 @@ def parse_corpus(
     logger.info("Building Stanza pipeline (processors=%s, gpu=%s)...",
                 STANZA_PROCESSORS, use_gpu)
     nlp = _build_pipeline(use_gpu)
+    import stanza
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     # Write to a temp file and rename at the end so an interrupted run never
@@ -184,20 +185,79 @@ def parse_corpus(
 
     sent_id = 0
     docs_seen = 0
+    buffer: list[tuple[str, str]] = []  # (domain, text) awaiting a batched parse
+
+    def _flush(out, sid: int) -> int:
+        """Parse the buffered records in ONE batched pipeline call.
+
+        Calling the pipeline per record (the old behaviour) spent almost all its
+        time on per-call overhead. Handing Stanza a list of Documents lets it
+        batch the neural work across them — the difference between ~1k and tens
+        of thousands of sentences a minute on a GPU.
+        """
+        if not buffer:
+            return sid
+        in_docs = [stanza.Document([], text=t) for _, t in buffer]
+        out_docs = nlp(in_docs)
+        for (domain, _text), doc in zip(buffer, out_docs, strict=True):
+            for sentence in doc.sentences:
+                sid += 1
+                out.write(_sentence_to_conllu(sentence, sid, domain))
+                out.write("\n")
+        buffer.clear()
+        return sid
+
     with open(tmp_path, "w", encoding="utf-8") as out:
         for domain, text in _iter_documents(raw_path):
-            doc = nlp(text)
-            for sentence in doc.sentences:
-                sent_id += 1
-                out.write(_sentence_to_conllu(sentence, sent_id, domain))
-                out.write("\n")
-                if sent_id % LOG_EVERY == 0:
-                    logger.info("Parsed %d sentences...", sent_id)
+            buffer.append((domain, text))
             docs_seen += 1
+            if len(buffer) >= doc_batch:
+                sent_id = _flush(out, sent_id)
+                logger.info("Parsed %d sentences (%d docs)...", sent_id, docs_seen)
+        sent_id = _flush(out, sent_id)
 
     tmp_path.replace(out_path)
     logger.info("Done: %d sentences from %d documents -> %s",
                 sent_id, docs_seen, out_path)
+    return out_path
+
+
+def write_lightweight_conllu(
+    raw_path: Path, out_path: Path, force: bool = False, max_records: int | None = None
+) -> Path:
+    """Write a minimal CoNLL-U for the replacement pool WITHOUT running Stanza.
+
+    The pool is only ever used as length/domain-matched filler — nothing reads
+    its parse trees (dose generation matches on text and word count). Full
+    dependency-parsing millions of pool sentences would cost many hours for
+    nothing, so we whitespace-tokenise instead and emit one ``FORM`` per token
+    with the other columns as ``_``. ``read_metadata`` (text + token count) and
+    ``conll2doc`` both read this fine; the filler carries no construction, so it
+    contributes zero matches to the dose sanity counts.
+
+    ``max_records`` caps how many records we keep — a few hundred thousand
+    matched-filler candidates is plenty, and it bounds the memory the dose stage
+    uses when it loads the pool.
+    """
+    if out_path.exists() and not force:
+        logger.info("Pool CoNLL-U already at %s; skipping.", out_path)
+        return out_path
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+    blank = "\t".join(["_"] * 8)  # LEMMA..MISC
+    sent_id = 0
+    with open(tmp_path, "w", encoding="utf-8") as out:
+        for domain, text in _iter_documents(raw_path):
+            sent_id += 1
+            out.write(f"# sent_id = {sent_id}\n# source_domain = {domain}\n# text = {text}\n")
+            for i, tok in enumerate(text.split(), start=1):
+                out.write(f"{i}\t{tok}\t{blank}\n")
+            out.write("\n")
+            if max_records is not None and sent_id >= max_records:
+                break
+    tmp_path.replace(out_path)
+    logger.info("Wrote lightweight pool CoNLL-U (%d records, no Stanza) -> %s",
+                sent_id, out_path)
     return out_path
 
 
@@ -350,8 +410,10 @@ def run(config_path: Path, force: bool = False, use_gpu: bool | None = None) -> 
     pool_raw = resolve_path(config_path, config["paths"]["replacement_pool"])
     pool_out = resolve_path(config_path, config["paths"]["parsed_pool"])
     if pool_raw.exists():
-        logger.info("Parsing replacement pool %s -> %s", pool_raw, pool_out)
-        parse_corpus(pool_raw, pool_out, force=force, use_gpu=use_gpu)
+        # The pool is matched filler only — no parse trees are ever needed, so we
+        # tokenise it cheaply instead of Stanza-parsing millions of sentences.
+        logger.info("Preparing replacement pool (lightweight) %s -> %s", pool_raw, pool_out)
+        write_lightweight_conllu(pool_raw, pool_out, force=force, max_records=400_000)
     else:
         logger.warning(
             "Replacement pool %s not found; skipping its parse. Dose generation "
