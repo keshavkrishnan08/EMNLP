@@ -198,23 +198,27 @@ def _run(cmd: str) -> int:
     return subprocess.call(cmd, shell=True)
 
 
-if _have_drc():
-    print("drc already importable — skipping repo setup.")
-    # Still try to locate WORK so os.chdir below lands somewhere sensible.
-    found = _find_repo()
-    if found is not None:
-        WORK = found
+# Locate the repo: an existing checkout, an uploaded dataset, or a fresh clone.
+# We do this even if `drc` already imports, because a stale checkout from an
+# earlier run would otherwise pin you to old code (and silently re-run old bugs).
+repo = _find_repo()
+if repo is None:
+    print(f"No local repo found; cloning {{REPO_URL}} -> {{WORK}}")
+    WORK.parent.mkdir(parents=True, exist_ok=True)
+    _run(f'git clone --depth 1 "{{REPO_URL}}" "{{WORK}}"')
 else:
-    repo = _find_repo()
-    if repo is not None and repo != WORK:
-        print(f"Found repo at {{repo}} (not cloning).")
-        WORK = repo
-    elif repo is None:
-        print(f"No local repo found; cloning {{REPO_URL}} -> {{WORK}}")
-        WORK.parent.mkdir(parents=True, exist_ok=True)
-        _run(f'git clone --depth 1 "{{REPO_URL}}" "{{WORK}}"')
-    else:
-        print(f"Using existing checkout at {{WORK}}")
+    WORK = repo
+    print(f"Using repo at {{WORK}}")
+    # If it's a writable git checkout, pull the latest so code fixes actually land.
+    # This is the difference between re-running old buggy code and the current fix.
+    # (Tracked files only — your gitignored data/ models/ results/ are untouched.)
+    if (WORK / ".git").exists():
+        rc = subprocess.call(
+            f'git -C "{{WORK}}" fetch --depth 1 origin main '
+            f'&& git -C "{{WORK}}" reset --hard origin/main', shell=True,
+        )
+        print("Updated checkout to latest origin/main."
+              if rc == 0 else "[warn] could not update checkout; using it as-is.")
 
     # Editable install so the deps land and `drc` is registered for subprocesses
     # too. NOTE: the extras brackets go INSIDE the quotes — pip install -e
