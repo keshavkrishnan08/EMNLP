@@ -312,14 +312,35 @@ def read_with_trees(conllu_path: Path) -> Iterator[ParsedSentence]:
         )
 
 
-def run(config_path: Path, force: bool = False, use_gpu: bool = False) -> None:
+def _resolve_use_gpu(use_gpu: bool | None) -> bool:
+    """Decide whether Stanza should parse on GPU.
+
+    ``None`` means "auto": use a GPU when one is visible (parsing happens before
+    training, so the cards are free and a GPU parse of the full corpus is far
+    faster than CPU). ``True``/``False`` force it. Falls back to CPU if torch
+    isn't importable.
+    """
+    if use_gpu is not None:
+        return use_gpu
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:  # noqa: BLE001 - no torch / no CUDA -> CPU
+        return False
+
+
+def run(config_path: Path, force: bool = False, use_gpu: bool | None = None) -> None:
     """Parse the training corpus, then the replacement pool.
 
     Both need a CoNLL-U parse: the training corpus feeds filtering and training,
     and dose generation draws matched replacements from the parsed pool. We parse
     both here so a single ``parse`` step leaves the data stage fully ready.
+    ``use_gpu=None`` auto-detects a GPU (the default).
     """
     config: dict[str, Any] = load_config(config_path)
+    use_gpu = _resolve_use_gpu(use_gpu)
+    logger.info("Parsing on %s.", "GPU" if use_gpu else "CPU")
     raw_path = resolve_path(config_path, config["paths"]["raw_corpus"])
     out_path = resolve_path(config_path, config["paths"]["parsed"])
     parse_corpus(raw_path, out_path, force=force, use_gpu=use_gpu)
@@ -350,8 +371,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Re-parse even if the cached CoNLL-U already exists.",
     )
     parser.add_argument(
-        "--gpu", action="store_true",
-        help="Let Stanza use a GPU if one is available.",
+        "--gpu", action=argparse.BooleanOptionalAction, default=None,
+        help="Force GPU (--gpu) or CPU (--no-gpu) for Stanza. Default: auto-detect.",
     )
     return parser
 
