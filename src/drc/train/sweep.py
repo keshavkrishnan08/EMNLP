@@ -120,6 +120,23 @@ def _write_manifest(manifest_path: Path, manifest: dict[str, Any]) -> None:
     tmp.replace(manifest_path)
 
 
+def _pilot_run(config: dict[str, Any]) -> tuple[str, Any, int]:
+    """Pick the pilot from the design.
+
+    With a shared full-corpus ceiling, that full model is the natural pilot: it
+    trains on the unfiltered corpus, it's always in the run set, and a healthy
+    perplexity there means the recipe is sound. Otherwise fall back to the first
+    core construction at dose 'all' (the legacy pilot).
+    """
+    from drc.design import FULL_CORPUS_CODE, core_constructions, seeds, shares_full_corpus
+
+    s = (seeds(config) or [PILOT_SEED])[0]
+    if shares_full_corpus(config):
+        return (FULL_CORPUS_CODE, "all", s)
+    core = core_constructions(config)
+    return (core[0] if core else PILOT_CONSTRUCTION, PILOT_DOSE, s)
+
+
 def run_pilot(config_path: Path, config: dict[str, Any]) -> bool:
     """Train the pilot and check its perplexity against the config gate.
 
@@ -129,7 +146,7 @@ def run_pilot(config_path: Path, config: dict[str, Any]) -> bool:
     """
     from .train import train_one
 
-    pilot = (PILOT_CONSTRUCTION, PILOT_DOSE, PILOT_SEED)
+    pilot = _pilot_run(config)
     threshold = float(config["evaluation"]["pilot_max_perplexity"])
 
     if is_done(config, config_path, pilot):

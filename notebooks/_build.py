@@ -101,20 +101,28 @@ stopped instead of redoing hours of work.
   line to `precision: fp16`. The GPU-detect cell below reminds you; it does not
   edit the config for you.
 
-## Chaining notebooks on Kaggle
+## Two notebooks
 
-The pipeline is split across notebooks so a long run survives the session limit
-and each phase can be re-run on its own. They chain through Kaggle's
-**notebook-output datasets**:
+The pipeline is split into just two notebooks so the expensive, hard-to-redo
+work is separated from the cheap work you'll iterate on:
 
-1. Run `kaggle_00_data` to completion. Its `/kaggle/working` is saved as a
-   notebook-output dataset when the run finishes (*Save Version*).
-2. In the next notebook (`kaggle_01_train`), add that output dataset as an input
-   (*Add Input -> Your Datasets*). It lands under `/kaggle/input/<dataset>/`.
-3. The **restore-prior-artifacts** cell copies any `data/`, `models/`, and
-   `results/` it finds under `/kaggle/input/*/` into the working repo, so the
-   already-done stages resume as *skipped* and this notebook only does its part.
-4. Repeat: `kaggle_01_train`'s output feeds `kaggle_02_eval_analysis`.
+1. **`kaggle_01_results`** — the heavy run (~10 h on dual-T4): download, parse,
+   audit, dose corpora, tokenizer, the 63-model training sweep, and SLOR +
+   n-gram evaluation. When it finishes you have all the raw results
+   (`results/eval_results.csv`, the sweep manifest, per-run perplexities) and a
+   summary that tells you whether training and eval looked healthy — so you can
+   decide **before** doing anything else whether you need to re-run.
+2. **`kaggle_02_analysis`** — the fast run (minutes, CPU): Hill fits, the E0
+   indirect-evidence index, model comparison, clustering, transfer,
+   predictability, generalization, the decision rule, and all figures. It reads
+   the CSVs the first notebook produced, so you can re-run and tweak the analysis
+   freely without ever retraining.
+
+They chain through Kaggle's **notebook-output datasets**: run
+`kaggle_01_results` to completion, *Save Version*, then in `kaggle_02_analysis`
+add that output as an input (*Add Input -> Your Datasets*). The
+**restore-prior-artifacts** cell copies its `data/`, `models/`, and `results/`
+into the working repo, so the analysis stages find everything they need.
 
 Nothing here fabricates results. A blocked or failed stage produces no numbers —
 it just says so in the dashboard and lets the rest proceed.
@@ -309,19 +317,27 @@ print(
     )
 
 
-def run_code(only_expr: str, only_human: str) -> dict:
-    """The cell that actually calls the pipeline runner."""
+def run_code(only_expr: str, only_human: str, config_path: str = "configs/base.yaml") -> dict:
+    """The cell that actually calls the pipeline runner.
+
+    ``config_path`` selects the config (the smoke notebook passes a tiny one).
+    Output locations are read from that config, so they're never hard-coded — the
+    later cells reuse ``CONFIG_PATH`` to find the right results directory.
+    """
     return code(
         f'''
 # --- Run the pipeline. ---------------------------------------------------------
-# default_phases() returns the 13 wired stages; run_pipeline() isolates failures,
+# default_phases() returns the wired stages; run_pipeline() isolates failures,
 # skips finished stages, blocks stages with unmet deps, and prints a dashboard.
 # It never raises on a stage failure, so this cell completes even if a stage dies.
 from pathlib import Path
 from drc.pipeline import default_phases, run_pipeline
+from drc.data.download import load_config, resolve_path
 
-cfg = Path("configs/base.yaml")
-status = Path("results/pipeline_status.json")
+CONFIG_PATH = "{config_path}"          # reused by the cells below
+cfg = Path(CONFIG_PATH)
+results_dir = resolve_path(cfg, load_config(cfg)["paths"]["results"])
+status = results_dir / "pipeline_status.json"
 
 # {only_human}
 only = {only_expr}
@@ -339,10 +355,14 @@ def status_code() -> dict:
         '''
 # --- Inspect what we produced. -------------------------------------------------
 # Tolerant of missing files: a fresh or partial run just shows fewer artifacts.
+# Reads the results dir from the same config the run cell used (CONFIG_PATH).
 import json
 from pathlib import Path
+from drc.data.download import load_config, resolve_path
 
-status_path = Path("results/pipeline_status.json")
+results_dir = resolve_path(Path(CONFIG_PATH), load_config(CONFIG_PATH)["paths"]["results"])
+
+status_path = results_dir / "pipeline_status.json"
 if status_path.exists():
     data = json.loads(status_path.read_text())
     print("Pipeline status:")
@@ -351,22 +371,112 @@ if status_path.exists():
         detail = f"  {r['detail']}" if r.get("detail") else ""
         print(f"  {r['status']:<8} {name:<18} {secs}{detail}")
 else:
-    print("No results/pipeline_status.json yet — has the run cell completed?")
+    print(f"No {status_path} yet — has the run cell completed?")
 
-for d in ("results", "results/figures"):
-    p = Path(d)
-    if p.is_dir():
-        items = sorted(x.name for x in p.iterdir())
+for d in (results_dir, results_dir / "figures"):
+    if d.is_dir():
+        items = sorted(x.name for x in d.iterdir())
         print(f"\\n{d}/ ({len(items)} items):")
         for it in items:
             print("  ", it)
     else:
         print(f"\\n{d}/ does not exist yet.")
 
-decision = Path("results/decision.txt")
+decision = results_dir / "decision.txt"
 if decision.exists():
-    print("\\n=== results/decision.txt ===")
+    print("\\n=== decision.txt ===")
     print(decision.read_text())
+'''
+    )
+
+
+def results_summary_code() -> dict:
+    """A 'do I need to re-run?' health check for the heavy results notebook.
+
+    Reads the sweep manifest and eval CSV and prints, per construction, the
+    zero-exposure floor E0 and the shared-ceiling E_max, plus any failed runs and
+    out-of-band perplexities. The point is to decide whether the expensive run is
+    trustworthy before moving on to analysis.
+    """
+    return code(
+        '''
+# --- Results health check: should I re-run anything? ---------------------------
+# Tolerant of partial runs. Surfaces failed training runs, perplexity outliers,
+# and the E0 / E_max each construction landed at, so you can judge the run.
+import json
+from pathlib import Path
+from drc.data.download import load_config, resolve_path
+
+_paths = load_config(CONFIG_PATH)["paths"]
+results_dir = resolve_path(Path(CONFIG_PATH), _paths["results"])
+models_dir = resolve_path(Path(CONFIG_PATH), _paths["models"])
+
+problems = []
+
+# 1) Training sweep: how many runs finished, and did any fail?
+manifest = results_dir / "sweep_manifest.json"
+if manifest.exists():
+    m = json.loads(manifest.read_text())
+    runs = m.get("runs", {})
+    by_status = {}
+    for r in runs.values():
+        by_status[r.get("status", "?")] = by_status.get(r.get("status", "?"), 0) + 1
+    print("Training runs:", dict(by_status), f"(of {m.get('total_runs', len(runs))})")
+    failed = [k for k, r in runs.items() if r.get("status") == "failed"]
+    if failed:
+        problems.append(f"{len(failed)} training run(s) failed: {failed[:5]}...")
+        print("  FAILED:", failed)
+else:
+    print("No sweep_manifest.json — training may not have run.")
+
+# 2) Held-out perplexities (sanity band [15, 40]).
+ppls = []
+for mj in sorted(models_dir.glob("ltgbert_*/metrics.json")):
+    try:
+        d = json.loads(mj.read_text())
+        ppl = d.get("perplexity") or d.get("final_perplexity")
+        if ppl is not None:
+            ppls.append((mj.parent.name, float(ppl)))
+    except Exception:
+        pass
+if ppls:
+    bad = [(n, p) for n, p in ppls if not (15 <= p <= 40)]
+    lo = min(p for _, p in ppls); hi = max(p for _, p in ppls)
+    print(f"\\nPerplexity: {len(ppls)} models, range {lo:.1f}-{hi:.1f}.")
+    if bad:
+        problems.append(f"{len(bad)} model(s) out of the [15,40] perplexity band.")
+        print("  OUT OF BAND:", bad[:5])
+
+# 3) E0 (dose 0) and E_max (shared 'full' model) per construction.
+eval_csv = results_dir / "eval_results.csv"
+if eval_csv.exists():
+    import pandas as pd
+    df = pd.read_csv(eval_csv)
+    self_eval = df[df["model_construction"] == df["eval_construction"]]
+    e0 = (self_eval[self_eval["dose"].astype(str) == "0"]
+          .groupby("eval_construction")["accuracy"].mean())
+    emax = (df[df["model_construction"] == "full"]
+            .groupby("eval_construction")["accuracy"].mean())
+    print("\\nPer-construction E0 (zero exposure) and E_max (full corpus):")
+    for c in sorted(set(e0.index) | set(emax.index)):
+        print(f"  {c:<26} E0={e0.get(c, float('nan')):.3f}   "
+              f"E_max={emax.get(c, float('nan')):.3f}")
+    # Replication sanity: the full model on AANN should land ~[0.55, 0.75].
+    aann_max = emax.get("aann")
+    if aann_max is not None and not (0.55 <= aann_max <= 0.75):
+        problems.append(f"AANN ceiling {aann_max:.2f} outside the ~[0.55,0.75] "
+                        "replication band — check the eval pipeline.")
+else:
+    print("\\nNo eval_results.csv yet — eval may not have run.")
+
+print("\\n" + "=" * 60)
+if problems:
+    print("RE-RUN GUIDANCE: issues found, review before trusting results:")
+    for p in problems:
+        print("  -", p)
+else:
+    print("RE-RUN GUIDANCE: no red flags. Proceed to kaggle_02_analysis.")
+print("=" * 60)
 '''
     )
 
@@ -425,23 +535,21 @@ def write_notebook(path: Path, cells: list[dict]) -> None:
     print("wrote", path)
 
 
-# Comments describing the install profile for each notebook's setup cell.
+# Comment describing the install profile for the results notebook's setup cell.
 _TRAIN_COMMENT = "Training needs the ML stack: torch, transformers, accelerate, etc."
-_DATA_COMMENT = "Data stages need Stanza (parsing) and datasets (download)."
-_EVAL_COMMENT = "Eval needs torch; analysis needs scipy/sklearn/matplotlib for fits + figures."
 
 
 def make_run_all() -> list[dict]:
     return [
         intro_md(
             "DRC — Run the whole pipeline (single session)",
-            "This is the **master** notebook. It runs all 13 stages end to end: "
-            "download, parse, audit, dose, tokenizer, train, eval, ngram, hill, "
-            "model_comparison, clustering, decision, figures. Use it when you "
-            "want everything in one go and expect to fit inside one session (or "
-            "to re-run after a timeout and let resume carry you the rest of the "
-            "way). For long training, the split notebooks (00/01/02) chain more "
-            "comfortably across sessions.",
+            "This is the **master** notebook: every stage end to end (data, "
+            "training, evaluation, and all analysis/figures) in one go. It's "
+            "right at Kaggle's ~12-hour session cap, so it suits a re-run that "
+            "resumes a mostly-finished pipeline. For a fresh run, prefer the two "
+            "split notebooks — `kaggle_01_results` (the ~10 h heavy run) then "
+            "`kaggle_02_analysis` (fast, re-runnable) — which separate the "
+            "expensive work from the work you'll iterate on.",
             "**Scope:** every stage (`only=None`).",
         ),
         # The master needs everything: ML stack + data deps + analysis deps.
@@ -457,95 +565,123 @@ def make_run_all() -> list[dict]:
     ]
 
 
-def make_data() -> list[dict]:
+# All stages that produce the raw results — everything expensive and hard to
+# redo. This is the ~10-hour notebook.
+_RESULTS_STAGES = [
+    "download", "parse", "audit", "dose", "tokenizer", "train", "eval", "ngram",
+]
+# Everything that only reads the result CSVs — cheap, CPU, safe to re-run.
+_ANALYSIS_STAGES = [
+    "hill", "model_comparison", "clustering", "transfer", "predictability",
+    "generalization", "indirect_evidence", "decision", "figures",
+]
+
+
+def make_results() -> list[dict]:
     return [
         intro_md(
-            "DRC — Data preparation (download -> dose corpora)",
-            "Builds the corpora the rest of the pipeline depends on. Stages: "
-            "**download, parse, audit, dose, tokenizer**. This is the first link "
-            "in the chain — run it to completion, *Save Version*, and attach its "
-            "output to `kaggle_01_train`. No GPU is strictly required here, but "
-            "Stanza parsing is much faster with one.",
-            "**Scope:** `only=[\"download\", \"parse\", \"audit\", \"dose\", \"tokenizer\"]`.",
+            "DRC — Results: data, training, evaluation (the heavy run)",
+            "This is the **one big notebook**. It does everything expensive and "
+            "hard to redo, end to end: download, parse, audit, build the dose "
+            "corpora, train the tokenizer, run the **63-model pilot-gated sweep**, "
+            "and evaluate (SLOR + n-gram). Budget **~10 hours on dual-T4**. When "
+            "it finishes you have all the raw results, and the health-check cell "
+            "at the bottom tells you whether to trust them or re-run. Each model "
+            "trains in its own subprocess and leaves a `metrics.json` when done, "
+            "so a timeout or crash costs you only the in-flight runs — just re-run "
+            "to continue. *Save Version* when it's green, then feed its output to "
+            "`kaggle_02_analysis`.",
+            "**Scope:** `only=" + json.dumps(_RESULTS_STAGES) + "`.",
         ),
         setup_code(
             extras="train",
-            pip_packages="stanza datasets",
-            extras_comment=_DATA_COMMENT,
+            pip_packages="",  # the `train` extra already pulls stanza + datasets
+            extras_comment=_TRAIN_COMMENT + " (also covers stanza + datasets).",
         ),
-        # 00 is the first notebook, so there's usually nothing to restore — but
-        # we keep the cell so re-running after a partial run still merges cleanly.
+        # Usually nothing to restore (this is the first notebook), but the cell
+        # makes re-running after a partial run merge cleanly.
         restore_code(),
         gpu_detect_code(),
-        run_code(
-            '["download", "parse", "audit", "dose", "tokenizer"]',
-            "Data stages only.",
+        run_code(json.dumps(_RESULTS_STAGES), "Data + training + evaluation."),
+        status_code(),
+        results_summary_code(),
+    ]
+
+
+def make_analysis() -> list[dict]:
+    return [
+        intro_md(
+            "DRC — Analysis & figures (fast, re-runnable)",
+            "Turns the raw results into the paper's numbers and figures. Stages: "
+            "**hill, model_comparison, clustering, transfer, predictability, "
+            "generalization, indirect_evidence, decision, figures**. All of it "
+            "reads the CSVs `kaggle_01_results` produced and runs on CPU in "
+            "minutes — so iterate here freely without ever retraining. **Attach "
+            "`kaggle_01_results`'s output dataset first** (*Add Input*) so the "
+            "restore cell brings in `results/` and `models/`.",
+            "**Scope:** `only=" + json.dumps(_ANALYSIS_STAGES) + "`. No GPU needed.",
         ),
+        # Analysis needs only the core deps (numpy/scipy/pandas/sklearn/matplotlib),
+        # which a plain editable install provides — no torch, no `train` extra.
+        setup_code(
+            extras="",
+            pip_packages="",
+            extras_comment="Analysis needs only the core deps (scipy/sklearn/"
+            "matplotlib/pandas); no GPU stack.",
+        ),
+        restore_code(),
+        gpu_detect_code(),
+        run_code(json.dumps(_ANALYSIS_STAGES), "Analysis and figures only."),
         status_code(),
     ]
 
 
-def make_train() -> list[dict]:
+def make_smoke() -> list[dict]:
     return [
         intro_md(
-            "DRC — Training sweep (dual-T4, resumable)",
-            "Runs the long **train** stage: the pilot-gated sweep over every "
-            "construction x dose x seed (60 runs on dual-T4, 48 in single-GPU "
-            "fallback). Each model trains in its own subprocess, and finished "
-            "runs leave a `metrics.json` that marks them done — so a timeout or "
-            "crash costs you at most the in-flight runs. Re-run to continue.",
-            "**Scope:** `only=[\"train\"]`. Attach `kaggle_00_data`'s output first "
-            "so the data stages restore and the sweep finds its corpora and "
-            "tokenizer.",
+            "DRC — Smoke test (~10 min): verify the pipeline runs on Kaggle",
+            "**Run this first.** It exercises the *entire* pipeline — every stage, "
+            "data through figures — but on a tiny config (`configs/smoke.yaml`): a "
+            "~150k-word slice of the corpus, a small 2-layer model, 1 epoch, 1 "
+            "seed, and a handful of doses. It finishes in roughly **10 minutes on "
+            "dual-T4** and exists to catch environment/wiring errors *before* you "
+            "commit to the ~10-hour real run. It also exercises the fp16 path T4 "
+            "needs. Its outputs go to **separate folders** (`data/smoke/`, "
+            "`models/smoke/`, `results/smoke/`), so they never collide with or "
+            "pollute the real run. If the dashboard and health check come back "
+            "clean here, the full run should too.",
+            "**Scope:** every stage, on the tiny `configs/smoke.yaml`.",
         ),
         setup_code(
             extras="train",
             pip_packages="",
-            extras_comment=_TRAIN_COMMENT,
-        ),
-        restore_code(),
-        gpu_detect_code(),
-        run_code('["train"]', "Training sweep only."),
-        status_code(),
-    ]
-
-
-def make_eval_analysis() -> list[dict]:
-    return [
-        intro_md(
-            "DRC — Evaluation & analysis (curves, clusters, figures)",
-            "Turns trained models into results. Stages: **eval, ngram, hill, "
-            "model_comparison, clustering, decision, figures**. Note `ngram` "
-            "only needs the corpora, so it runs even if training never finished. "
-            "`eval` and the analysis stages need the model manifest, so attach "
-            "`kaggle_01_train`'s output (which also carries the data) before "
-            "running.",
-            "**Scope:** `only=[\"eval\", \"ngram\", \"hill\", \"model_comparison\", "
-            "\"clustering\", \"decision\", \"figures\"]`.",
-        ),
-        setup_code(
-            extras="train",  # eval imports torch
-            pip_packages="scipy scikit-learn matplotlib",
-            extras_comment=_EVAL_COMMENT,
+            extras_comment="Smoke runs every stage, so install the full stack "
+            "(train extra covers stanza + datasets; core deps cover analysis).",
         ),
         restore_code(),
         gpu_detect_code(),
         run_code(
-            '["eval", "ngram", "hill", "model_comparison", '
-            '"clustering", "decision", "figures"]',
-            "Evaluation and analysis stages.",
+            "None  # None == every stage",
+            "Run EVERY stage on the tiny smoke config.",
+            config_path="configs/smoke.yaml",
         ),
         status_code(),
+        results_summary_code(),
     ]
 
 
 def main() -> None:
     NOTEBOOKS_DIR.mkdir(parents=True, exist_ok=True)
+    # Remove the old four-way split notebooks if present, so the directory
+    # reflects the current notebook design.
+    for stale in ("kaggle_00_data.ipynb", "kaggle_01_train.ipynb",
+                  "kaggle_02_eval_analysis.ipynb"):
+        (NOTEBOOKS_DIR / stale).unlink(missing_ok=True)
     notebooks = {
+        "kaggle_00_smoke.ipynb": make_smoke(),
+        "kaggle_01_results.ipynb": make_results(),
+        "kaggle_02_analysis.ipynb": make_analysis(),
         "kaggle_run_all.ipynb": make_run_all(),
-        "kaggle_00_data.ipynb": make_data(),
-        "kaggle_01_train.ipynb": make_train(),
-        "kaggle_02_eval_analysis.ipynb": make_eval_analysis(),
     }
     for name, cells in notebooks.items():
         write_notebook(NOTEBOOKS_DIR / name, cells)

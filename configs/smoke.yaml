@@ -1,0 +1,75 @@
+# Smoke / micro config: run the ENTIRE pipeline tiny, in ~10 minutes, to verify
+# there are no environment or wiring errors on Kaggle BEFORE the ~10-hour real
+# run. Everything here is shrunk — corpus slice, model, epochs, doses, seeds —
+# and all outputs go to *_smoke directories so this never touches the real run's
+# data/models/results. Used by notebooks/kaggle_00_smoke.ipynb.
+#
+# This is NOT a scientific run. The numbers it produces are meaningless; the
+# point is only that every stage executes end to end without error.
+
+data:
+  strict_small_repo: BabyLM-community/BabyLM-2026-Strict-Small
+  strict_repo: BabyLM-community/BabyLM-2026-Strict
+  max_corpus_words: 150000   # tiny slice of the 10M set
+  max_pool_words: 60000      # tiny replacement pool
+
+# Small tiered design: enough to exercise core (full curve) + breadth (E0) +
+# the shared ceiling. core_doses has 3 points so that, with the shared "all"
+# ceiling, a core construction has the 4 points a Hill fit needs.
+design:
+  core_constructions: [aann, tough_movement, comparative_correlative, resultative]
+  breadth_constructions: [existential_there, it_cleft]
+  core_doses: [0, 4, 16]
+  breadth_doses: [0]
+  seeds: [42]
+  shared_full_corpus: true
+
+# A deliberately tiny model — trains in seconds, just enough to run the code.
+model:
+  architecture: ltg-bert-base
+  hidden_size: 64
+  num_hidden_layers: 2
+  num_attention_heads: 2
+  intermediate_size: 128
+  max_position_embeddings: 64
+  vocab_size: 2000
+
+training:
+  batch_size: 16
+  max_seq_length: 64
+  learning_rate: 1.0e-3
+  warmup_ratio: 0.1
+  lr_schedule: cosine
+  optimizer: adamw
+  adam_beta1: 0.9
+  adam_beta2: 0.98
+  adam_epsilon: 1.0e-6
+  weight_decay: 0.1
+  num_epochs: 1
+  mlm_probability: 0.15
+  whole_word_masking: true
+  max_grad_norm: 1.0
+  precision: fp16          # T4-safe (also what the real run should use on T4)
+  log_every_n_steps: 20
+  save_every_n_epochs: 1
+  heldout_words: 2000
+
+evaluation:
+  # Wide-open gates so the smoke is never blocked by a (meaningless) tiny-model
+  # perplexity. The real config keeps tight bands.
+  pilot_max_perplexity: 1.0e9
+  pilot_aann_acc_range: [0.0, 1.0]
+  perplexity_range: [0.0, 1.0e9]
+
+# Separate output tree — nothing here collides with the real run.
+paths:
+  raw_corpus: data/smoke/raw/babylm_slice.txt
+  replacement_pool: data/smoke/raw/pool_slice.txt
+  parsed: data/smoke/parsed/corpus.conllu
+  parsed_pool: data/smoke/parsed/pool.conllu
+  filtered: data/smoke/filtered
+  dose_corpora: data/smoke/dose_corpora
+  tokenizer: models/smoke/tokenizer
+  models: models/smoke
+  eval_items: evaluation/eval_items   # reuse the real (small) eval items
+  results: results/smoke

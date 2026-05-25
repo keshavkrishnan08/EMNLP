@@ -214,6 +214,16 @@ def download_10m(config: dict[str, Any], config_path: Path) -> Path:
     logger.info("Downloading BabyLM strict-small (10M) from '%s'...", repo)
     records = _records_from_files(_download_train_files(repo))
 
+    # Smoke/micro runs cap the corpus to a tiny slice (data.max_corpus_words) so
+    # the whole pipeline finishes in minutes. When set, skip the 10M band check.
+    max_words = config.get("data", {}).get("max_corpus_words")
+    if max_words:
+        records = _truncate_to_words(records, int(max_words))
+        logger.info("Capped corpus to %d words (%d records) for a short run.",
+                    _count_words(records), len(records))
+        _write_records(records, dest)
+        return dest
+
     n_words = _count_words(records)
     low = TARGET_10M_WORDS * (1 - WORD_COUNT_TOLERANCE)
     high = TARGET_10M_WORDS * (1 + WORD_COUNT_TOLERANCE)
@@ -238,6 +248,8 @@ def download_replacement_pool(
     """Download a slice of the 100M strict set to use as a replacement pool."""
     repo = _repo_for(config, "strict_repo", BABYLM_STRICT_REPO)
     dest = resolve_path(config_path, config["paths"]["replacement_pool"])
+    # A short run can shrink the pool too (data.max_pool_words).
+    max_words = int(config.get("data", {}).get("max_pool_words", max_words))
     logger.info("Downloading replacement pool from '%s' (up to %d words)...", repo, max_words)
     records = _records_from_files(_download_train_files(repo))
     records = _truncate_to_words(records, max_words)

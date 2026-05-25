@@ -346,6 +346,11 @@ def default_phases(config_path: Path, single_gpu: bool = False) -> list[Stage]:
             is_done=lambda: (results_dir / "generalization.csv").exists(),
             requires=("eval",), description="memorization vs generalization (seen/novel fillers)",
         ),
+        Stage(
+            "indirect_evidence", cli("drc.analysis.indirect_evidence"),
+            is_done=lambda: (results_dir / "indirect_evidence.csv").exists(),
+            requires=("eval",), description="E0 indirect-evidence index (headline) + fig9",
+        ),
     ]
 
 

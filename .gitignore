@@ -48,3 +48,6 @@ paper/*.pdf
 *.swp
 .idea/
 .vscode/
+
+# Smoke-run scratch (micro verification run)
+data/smoke/

@@ -65,9 +65,15 @@ def default_corpus_path(config: dict[str, Any], config_path: Path) -> Path:
     """Build the path to the canonical training corpus from the config.
 
     Matches the filename convention in :mod:`drc.data.dose_corpora`
-    (``{construction}_dose-{dose}.conllu``).
+    (``{construction}_dose-{dose}.conllu``). With a shared full-corpus design we
+    train on that full corpus — it's the largest and always present; otherwise we
+    fall back to the legacy AANN dose=all corpus.
     """
+    from drc.design import FULL_CORPUS_CODE, shares_full_corpus
+
     dose_root = resolve_path(config_path, config["paths"]["dose_corpora"])
+    if shares_full_corpus(config):
+        return dose_root / f"{FULL_CORPUS_CODE}_dose-all.conllu"
     return dose_root / f"{CANONICAL_CONSTRUCTION}_dose-{CANONICAL_DOSE}.conllu"
 
 
@@ -97,13 +103,14 @@ def build_tokenizer():
     return ByteLevelBPETokenizer()
 
 
-def train(corpus_path: Path, out_dir: Path) -> Path:
+def train(corpus_path: Path, out_dir: Path, vocab_size: int = VOCAB_SIZE) -> Path:
     """Train the BPE tokenizer on ``corpus_path`` and save it to ``out_dir``.
 
     Saves the legacy pair (``vocab.json`` + ``merges.txt``) and the unified
     ``tokenizer.json``. The transformers ``PreTrainedTokenizerFast`` loader the
     training code uses prefers the single-file form, but we write both so the
-    artifacts are usable either way.
+    artifacts are usable either way. ``vocab_size`` should match
+    ``model.vocab_size`` in the config (the caller passes it through).
     """
     if not corpus_path.exists():
         raise FileNotFoundError(
@@ -114,10 +121,10 @@ def train(corpus_path: Path, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     tokenizer = build_tokenizer()
 
-    logger.info("Training Byte-Level BPE (vocab=%d) on %s...", VOCAB_SIZE, corpus_path)
+    logger.info("Training Byte-Level BPE (vocab=%d) on %s...", vocab_size, corpus_path)
     tokenizer.train_from_iterator(
         iter_corpus_text(corpus_path),
-        vocab_size=VOCAB_SIZE,
+        vocab_size=vocab_size,
         min_frequency=MIN_FREQUENCY,
         special_tokens=SPECIAL_TOKENS,
     )
@@ -145,20 +152,34 @@ def _load_fast_tokenizer(out_dir: Path):
     )
 
 
-def sanity_check(out_dir: Path, corpus_path: Path, sample_sentences: int = 2000) -> dict:
+def sanity_check(
+    out_dir: Path,
+    corpus_path: Path,
+    sample_sentences: int = 2000,
+    vocab_size: int = VOCAB_SIZE,
+) -> dict:
     """Verify the saved tokenizer: vocab size, round-trips, tokens-per-word.
 
-    Returns a small report dict and raises ``AssertionError`` on any failure so
-    a broken tokenizer can't slip silently into 60 downstream runs. The
-    tokens-per-word figure is measured on a sample of corpus sentences, not the
-    five canned ones, so it reflects real text.
+    Round-trip failure is fatal (it would corrupt every downstream run). The
+    vocab-size and tokens-per-word checks are advisory warnings: a small corpus
+    (e.g. a smoke run) legitimately can't fill a large target vocab, and the
+    tokens-per-word band is calibrated for the full corpus. We log loudly but
+    don't abort on those, so a short verification run isn't blocked by them.
     """
     tok = _load_fast_tokenizer(out_dir)
 
-    vocab_size = tok.vocab_size
-    assert vocab_size == VOCAB_SIZE, (
-        f"Vocab size is {vocab_size}, expected {VOCAB_SIZE}."
-    )
+    actual_vocab = tok.vocab_size
+    if actual_vocab > vocab_size:
+        raise AssertionError(
+            f"Vocab size {actual_vocab} exceeds the target {vocab_size} — "
+            "model embeddings would be too small."
+        )
+    if actual_vocab < vocab_size:
+        logger.warning(
+            "Vocab size is %d, below the target %d (expected on a small corpus).",
+            actual_vocab, vocab_size,
+        )
+    vocab_size = actual_vocab
 
     # Round-trip: encode then decode should recover the sentence's content. BPE
     # decode can shift whitespace, so compare on collapsed whitespace.
@@ -184,10 +205,12 @@ def sanity_check(out_dir: Path, corpus_path: Path, sample_sentences: int = 2000)
 
     tokens_per_word = (total_tokens / total_words) if total_words else float("nan")
     lo, hi = TOKENS_PER_WORD_RANGE
-    assert lo <= tokens_per_word <= hi, (
-        f"Avg tokens/word is {tokens_per_word:.3f}, outside [{lo}, {hi}]. "
-        "The vocabulary or corpus is probably wrong."
-    )
+    if not (lo <= tokens_per_word <= hi):
+        logger.warning(
+            "Avg tokens/word is %.3f, outside [%s, %s]. Expected on a small "
+            "corpus; on the full corpus this would mean the vocab is off.",
+            tokens_per_word, lo, hi,
+        )
 
     report = {
         "vocab_size": vocab_size,
@@ -211,10 +234,11 @@ def run(
     config = load_config(config_path)
     out_dir = resolve_path(config_path, config["paths"]["tokenizer"])
     corpus = corpus_path or default_corpus_path(config, config_path)
+    vocab_size = int(config.get("model", {}).get("vocab_size", VOCAB_SIZE))
 
-    train(corpus, out_dir)
+    train(corpus, out_dir, vocab_size=vocab_size)
     if not skip_sanity:
-        sanity_check(out_dir, corpus)
+        sanity_check(out_dir, corpus, vocab_size=vocab_size)
     return out_dir
 
 
