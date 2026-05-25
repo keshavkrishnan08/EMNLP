@@ -220,22 +220,25 @@ else:
         print("Updated checkout to latest origin/main."
               if rc == 0 else "[warn] could not update checkout; using it as-is.")
 
-    # Editable install so the deps land and `drc` is registered for subprocesses
-    # too. NOTE: the extras brackets go INSIDE the quotes — pip install -e
-    # "PATH[extra]" — otherwise the shell splits off "[extra]" and pip errors.
-    installed = False
-    if EXTRA:
-        installed = subprocess.call(f'pip install -q -e "{{WORK}}[{{EXTRA}}]"', shell=True) == 0
-        if not installed:
-            print("[warn] editable install with the extra failed; trying plain -e")
+# Install — ALWAYS, whether we just cloned or found an existing checkout. (This
+# block is intentionally at top level, not under the else above: a fresh clone
+# must still install its deps.) Editable install registers `drc` and pulls deps;
+# note the extras brackets go INSIDE the quotes — pip install -e "PATH[extra]" —
+# or the shell splits off "[extra]" and pip errors.
+installed = False
+if EXTRA:
+    installed = subprocess.call(f'pip install -q -e "{{WORK}}[{{EXTRA}}]"', shell=True) == 0
     if not installed:
-        installed = subprocess.call(f'pip install -q -e "{{WORK}}"', shell=True) == 0
-    if not installed:
-        print("[warn] editable install failed; relying on PYTHONPATH below.")
+        print("[warn] editable install with the extra failed; trying plain -e")
+if not installed:
+    installed = subprocess.call(f'pip install -q -e "{{WORK}}"', shell=True) == 0
+if not installed:
+    print("[warn] editable install failed; relying on PYTHONPATH below.")
 
-    # Notebook-specific plain packages (e.g. stanza, scipy) on top of the base.
-    if PIP_PACKAGES.strip():
-        _run(f"pip install -q {{PIP_PACKAGES}}")
+# Notebook-specific plain packages Kaggle's image lacks (e.g. stanza). Installed
+# explicitly so they land even if the editable-extra resolve was skipped.
+if PIP_PACKAGES.strip():
+    _run(f"pip install -q {{PIP_PACKAGES}}")
 
 # Make `drc` importable BOTH here and in the subprocesses the pipeline spawns.
 # The pipeline runs each stage as `python -m drc...`, a fresh process that
