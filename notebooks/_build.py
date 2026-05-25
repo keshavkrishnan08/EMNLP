@@ -28,7 +28,13 @@ NOTEBOOKS_DIR = Path(__file__).resolve().parent
 
 # The working directory on Kaggle. Everything — the cloned/installed repo, the
 # config's relative paths, and all stage outputs — lives under here.
-WORK_DIR = "/kaggle/working/drc-emnlp-2026"
+WORK_DIR = "/kaggle/working/EMNLP"
+
+# Default clone URL baked into the notebooks. HTTPS (not SSH) because Kaggle has
+# no SSH deploy key — HTTPS clones a PUBLIC repo with no auth. If the repo is
+# private, either make it public, upload it as a Kaggle dataset (the setup cell
+# finds it under /kaggle/input automatically), or put a token in the URL.
+REPO_URL = "https://github.com/keshavkrishnan08/EMNLP.git"
 
 
 # --------------------------------------------------------------------------- #
@@ -145,9 +151,11 @@ def setup_code(extras: str, pip_packages: str, extras_comment: str) -> dict:
 import os, sys, glob, subprocess
 from pathlib import Path
 
-# Replace this with your repo's clone URL (used only if the repo isn't already
-# present as a Kaggle dataset or a prior checkout under /kaggle/working).
-REPO_URL = "https://github.com/your-org/drc-emnlp-2026.git"  # <-- EDIT ME
+# Clone URL, used only if the repo isn't already present (as a Kaggle dataset or
+# a prior /kaggle/working checkout). HTTPS clones a PUBLIC repo with no auth; for
+# a private repo, upload it as a Kaggle dataset instead (the cell finds it under
+# /kaggle/input), or put a token in the URL: https://<token>@github.com/owner/repo.git
+REPO_URL = "{REPO_URL}"
 WORK = Path("{WORK_DIR}")
 
 # {extras_comment}
@@ -167,8 +175,12 @@ def _find_repo() -> Path | None:
     """Look for an existing checkout: a uploaded dataset or a prior /kaggle/working."""
     candidates = []
     # A repo uploaded as a Kaggle dataset shows up under /kaggle/input/<name>/...
-    candidates += glob.glob("/kaggle/input/*/drc-emnlp-2026")
-    candidates += glob.glob("/kaggle/input/*/src/drc")   # repo root contains src/drc
+    # Match it however it's nested: a `src/drc` at one or two levels down, or a
+    # named folder. We don't assume any particular dataset/repo name.
+    candidates += glob.glob("/kaggle/input/*/src/drc")
+    candidates += glob.glob("/kaggle/input/*/*/src/drc")
+    candidates += glob.glob("/kaggle/input/*/EMNLP")
+    candidates += glob.glob("/kaggle/input/*")
     candidates += [str(WORK)]
     for c in candidates:
         c = Path(c)
@@ -254,7 +266,8 @@ RESTORE_DIRS = ("data", "models", "results")
 # Candidate source roots: a chained notebook-output dataset will contain the
 # repo's working tree, either at the repo root or one level down.
 sources = []
-sources += glob.glob("/kaggle/input/*/drc-emnlp-2026")
+sources += glob.glob("/kaggle/input/*/EMNLP")
+sources += glob.glob("/kaggle/input/*/*")
 sources += glob.glob("/kaggle/input/*")
 
 restored = []

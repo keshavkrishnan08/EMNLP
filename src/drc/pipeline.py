@@ -351,6 +351,12 @@ def default_phases(config_path: Path, single_gpu: bool = False) -> list[Stage]:
             is_done=lambda: (results_dir / "indirect_evidence.csv").exists(),
             requires=("eval",), description="E0 indirect-evidence index (headline) + fig9",
         ),
+        Stage(
+            "measure_robustness", cli("drc.analysis.measure_robustness"),
+            is_done=lambda: (results_dir / "measure_robustness.csv").exists(),
+            requires=("eval",),
+            description="second-measure (mean-LP) robustness of the dose-response",
+        ),
     ]
 
 

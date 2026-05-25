@@ -197,6 +197,38 @@ def slor(
     return (pll - uni) / _token_count(sentence)
 
 
+def slor_and_meanlp(
+    model: Any,
+    tokenizer: Any,
+    sentence: str,
+    unigram_counts: Counter[str],
+    *,
+    mask_batch_size: int = DEFAULT_MASK_BATCH_SIZE,
+    device: str | None = None,
+) -> tuple[float, float]:
+    """Score one sentence under *both* acceptability measures in one pass.
+
+    SLOR and the plain length-normalised PLL share the exact same forward
+    passes — the only difference is whether you subtract the unigram baseline
+    before dividing by length. Computing the pseudo-log-likelihood is the
+    expensive part, so we run it once and hand back both numbers:
+
+        SLOR(s)    = (PLL(s) - log P_unigram(s)) / |s|
+        mean-LP(s) =  PLL(s)                      / |s|
+
+    The mean-LP version is the second, unigram-free measure the robustness
+    check leans on. Returning it here keeps that check free: no extra model
+    calls, just a second division of a value we already had.
+    """
+    pll = pseudo_log_likelihood(
+        model, tokenizer, sentence,
+        mask_batch_size=mask_batch_size, device=device,
+    )
+    length = _token_count(sentence)
+    uni = unigram_logprob(sentence, unigram_counts)
+    return (pll - uni) / length, pll / length
+
+
 def slor_batch(
     model: Any,
     tokenizer: Any,
