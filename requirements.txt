@@ -13,6 +13,7 @@ tokenizers>=0.15
 safetensors>=0.4
 accelerate>=0.28
 datasets>=2.18
+huggingface_hub>=0.23   # download.py fetches BabyLM files directly via the Hub
 stanza>=1.7
 
 # Optional: LLM-as-judge for filter QA. Only needed with `--judge llm`.

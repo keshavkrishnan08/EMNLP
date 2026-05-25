@@ -40,6 +40,7 @@ train = [
     "safetensors>=0.4",
     "accelerate>=0.28",
     "datasets>=2.18",
+    "huggingface_hub>=0.23",
     "stanza>=1.7",
 ]
 # Optional LLM-as-judge for the filter QA audit.

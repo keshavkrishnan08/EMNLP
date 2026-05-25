@@ -44,10 +44,19 @@ evaluation:
   # Sweep-wide sanity band for held-out perplexity.
   perplexity_range: [15.0, 40.0]
 
+# BabyLM data sources on the Hugging Face Hub. These are the official 2026
+# edition repos (per-domain `<domain>.train.txt` files). When BabyLM re-releases,
+# point these at the new edition — the download stage reads them from here, so
+# no code change is needed. Current repos are linked from https://babylm.github.io.
+data:
+  strict_small_repo: BabyLM-community/BabyLM-2026-Strict-Small   # the 10M train set
+  strict_repo: BabyLM-community/BabyLM-2026-Strict               # 100M set -> replacement pool
+
 paths:
-  raw_corpus: data/raw/babylm_10M
-  replacement_pool: data/raw/babylm_100M_pool
-  parsed: data/parsed/babylm_10M.conllu
+  raw_corpus: data/raw/babylm_10M.txt          # downloaded corpus: domain<TAB>text per line
+  replacement_pool: data/raw/babylm_100M_pool.txt
+  parsed: data/parsed/babylm_10M.conllu        # Stanza parse of the training corpus
+  parsed_pool: data/parsed/babylm_100M_pool.conllu  # Stanza parse of the replacement pool
   filtered: data/filtered
   dose_corpora: data/dose_corpora
   tokenizer: models/tokenizer

@@ -252,9 +252,7 @@ def run(
     """Generate every dose corpus (or just one construction's) and verify them."""
     config: dict[str, Any] = load_config(config_path)
     parsed_path = resolve_path(config_path, config["paths"]["parsed"])
-    pool_parsed = resolve_path(config_path, config["paths"]["replacement_pool"])
-    pool_parsed = pool_parsed.with_suffix(".conllu") if pool_parsed.suffix == "" \
-        else pool_parsed
+    pool_parsed = resolve_path(config_path, config["paths"]["parsed_pool"])
     out_root = resolve_path(config_path, config["paths"]["dose_corpora"])
     results_root = resolve_path(config_path, config["paths"]["results"])
 
@@ -265,9 +263,9 @@ def run(
         )
     if not pool_parsed.exists():
         raise FileNotFoundError(
-            f"Parsed replacement pool not found at {pool_parsed}. Parse the pool "
-            "with `python -m drc.data.parse` pointed at the pool path, or set "
-            "paths.replacement_pool to a CoNLL-U file."
+            f"Parsed replacement pool not found at {pool_parsed}. Run "
+            "`python -m drc.data.parse` (it parses both the corpus and the pool) "
+            "after downloading the pool without --skip-pool."
         )
 
     constructions = (only_construction,) if only_construction else _constructions()

@@ -264,10 +264,30 @@ def read_with_trees(conllu_path: Path) -> Iterator[ParsedSentence]:
 
 
 def run(config_path: Path, force: bool = False, use_gpu: bool = False) -> None:
+    """Parse the training corpus, then the replacement pool.
+
+    Both need a CoNLL-U parse: the training corpus feeds filtering and training,
+    and dose generation draws matched replacements from the parsed pool. We parse
+    both here so a single ``parse`` step leaves the data stage fully ready.
+    """
     config: dict[str, Any] = load_config(config_path)
     raw_path = resolve_path(config_path, config["paths"]["raw_corpus"])
     out_path = resolve_path(config_path, config["paths"]["parsed"])
     parse_corpus(raw_path, out_path, force=force, use_gpu=use_gpu)
+
+    # The replacement pool is optional (you can --skip-pool the download), so
+    # only parse it when the raw file is actually there.
+    pool_raw = resolve_path(config_path, config["paths"]["replacement_pool"])
+    pool_out = resolve_path(config_path, config["paths"]["parsed_pool"])
+    if pool_raw.exists():
+        logger.info("Parsing replacement pool %s -> %s", pool_raw, pool_out)
+        parse_corpus(pool_raw, pool_out, force=force, use_gpu=use_gpu)
+    else:
+        logger.warning(
+            "Replacement pool %s not found; skipping its parse. Dose generation "
+            "needs it — run the download without --skip-pool, then re-run parse.",
+            pool_raw,
+        )
 
 
 def _build_parser() -> argparse.ArgumentParser:

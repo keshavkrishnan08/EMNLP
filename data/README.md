@@ -8,10 +8,11 @@ is committed to git — the corpora are large and carry their own licenses.
 ```
 data/
 ├── raw/
-│   ├── babylm_10M/          # BabyLM 2024 strict-small training corpus
-│   └── babylm_100M_pool/    # replacement-sentence pool (100M strict slice)
+│   ├── babylm_10M.txt           # training corpus: one `domain<TAB>text` line per record
+│   └── babylm_100M_pool.txt     # replacement-sentence pool (100M-strict slice)
 ├── parsed/
-│   └── babylm_10M.conllu    # Stanza dependency parse, cached
+│   ├── babylm_10M.conllu        # Stanza parse of the training corpus (cached)
+│   └── babylm_100M_pool.conllu  # Stanza parse of the pool (cached)
 ├── filtered/
 │   └── <construction>_positives.jsonl
 ├── qa_audits/
@@ -24,17 +25,25 @@ data/
 ## Obtaining BabyLM
 
 The [BabyLM Challenge](https://babylm.github.io/) corpus is distributed by its
-organizers. `drc.data.download` pulls the strict-small (10M) set and a 100M-strict
-slice from the HuggingFace Hub:
+organizers as **one plain-text file per source domain** (`<domain>.train.txt`).
+`drc.data.download` fetches those files straight from the Hugging Face Hub with
+`huggingface_hub` (no `datasets` loading script), tags each line with the domain
+taken from its filename, and writes the combined `domain<TAB>text` corpus:
 
 ```bash
 python -m drc.data.download --config configs/base.yaml
 ```
 
-The dataset identifiers are documented as constants at the top of
-`src/drc/data/download.py`. Hub names occasionally change between BabyLM editions;
-if the download fails, the module raises a clear error rather than guessing — check
-the [BabyLM data page](https://babylm.github.io/) and update the constant.
+The repo ids live in the `data:` block of `configs/base.yaml` (defaulting to the
+official 2026 edition — `BabyLM-community/BabyLM-2026-Strict-Small` and
+`BabyLM-community/BabyLM-2026-Strict`). BabyLM re-releases yearly, so when a newer
+edition lands, point those two keys at it — no code change needed. You can also
+override per-run with `--strict-small-repo` / `--strict-repo`. If a repo can't be
+reached, the module raises a clear error rather than writing an empty corpus;
+check the current edition at <https://babylm.github.io>.
+
+`drc.data.parse` then parses **both** the corpus and the pool to CoNLL-U — dose
+generation draws its matched replacement sentences from the parsed pool.
 
 ## Licensing
 
