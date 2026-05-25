@@ -10,16 +10,18 @@
 data:
   strict_small_repo: BabyLM-community/BabyLM-2026-Strict-Small
   strict_repo: BabyLM-community/BabyLM-2026-Strict
-  max_corpus_words: 150000   # tiny slice of the 10M set
-  max_pool_words: 60000      # tiny replacement pool
+  max_corpus_words: 120000   # tiny slice of the 10M set
+  max_pool_words: 50000      # tiny replacement pool
 
-# Small tiered design: enough to exercise core (full curve) + breadth (E0) +
-# the shared ceiling. core_doses has 3 points so that, with the shared "all"
-# ceiling, a core construction has the 4 points a Hill fit needs.
+# IDENTICAL design to configs/base.yaml — same 8 constructions, same doses, the
+# shared ceiling — so every code path (all 8 filters, the full core ladder, the
+# breadth tier) actually runs. The ONLY structural cut is seeds: 1 instead of 3.
+# Everything else that makes this fast lives in `model`/`training`/`data` below
+# (tiny model, 1 epoch, tiny corpus), none of which changes which code runs.
 design:
-  core_constructions: [aann, tough_movement, comparative_correlative, resultative]
-  breadth_constructions: [existential_there, it_cleft]
-  core_doses: [0, 4, 16]
+  core_constructions: [aann, comparative_correlative, tough_movement, resultative]
+  breadth_constructions: [existential_there, it_cleft, negative_inversion, subject_to_object_raising]
+  core_doses: [0, 4, 16, 64]
   breadth_doses: [0]
   seeds: [42]
   shared_full_corpus: true
