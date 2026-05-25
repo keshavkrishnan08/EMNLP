@@ -121,11 +121,17 @@ Most work answers this only at the extremes. Filtered-corpus training
 asks whether a model can learn a phenomenon from \emph{zero} direct
 exposure, leaning entirely on indirect evidence
 \citep{patil2024fict,leong2024passives,misra2024aann}. That's a sharp,
-useful test. But it skips the middle of the curve. Between ``never seen
-it'' and ``seen it everywhere'' lies the interesting part: does
-competence rise smoothly with exposure, or snap into place past a
-threshold? Does every construction follow the same trajectory, or do
-different constructions need wildly different amounts of data?
+useful test, but it skips the middle of the curve. The closest prior work,
+\citet{oba2024widet}, does sample several exposure counts and is the right
+precedent here --- yet it reads the resulting curves qualitatively
+(``rises gradually, then plateaus'') and never fits a model or extracts a
+number. That is exactly the gap we close. Between ``never seen it'' and
+``seen it everywhere'' lies the interesting part: does competence rise
+smoothly with exposure, or snap into place past a threshold? Does every
+construction follow the same trajectory, or do different constructions
+need wildly different amounts of data? We answer those questions with a
+\emph{parametric} model whose fitted parameters are directly comparable
+across constructions.
 
 We borrow the workhorse tool of dose-response pharmacology. Swap drug
 concentration for ``number of construction exposures in pretraining'' and
@@ -167,12 +173,22 @@ is whatever the rule selects, not a story we backfilled.
 
 Our contributions:
 \begin{itemize}
-  \item A dose-response methodology for construction learning that fits
-        interpretable Hill curves to acceptability as a function of
-        pretraining exposure, with a frozen 60-run design.
+  \item The first \emph{parametric} dose-response characterization of
+        construction learning: we fit Hill curves to acceptability as a
+        function of pretraining exposure and extract a per-construction
+        learnability threshold (\Efifty), steepness (\hilln), and an
+        indirect-evidence floor (\Ezero) that are comparable across
+        constructions --- turning the qualitative exposure curves of prior
+        work \citep{oba2024widet} into quantitative estimates, on a frozen
+        60-run design.
+  \item Three analyses the dosing design makes possible and that prior work
+        has not run: predicting \Efifty{} from corpus properties
+        (Section~\ref{sec:predictability}), a cross-construction
+        \emph{transfer} matrix (Section~\ref{sec:transfer}), and a
+        seen-versus-novel-filler split that separates memorization from
+        generalization (Section~\ref{sec:generalization}).
   \item A pre-registered hypothesis space and decision rule that fixes the
         interpretation in advance.
-  \item \resultpending{empirical contribution stated once results exist}
   \item Released code, frozen dose corpora, evaluation items, and fitted
         curves for full reproduction.
 \end{itemize}
@@ -191,8 +207,13 @@ large amounts of data. \citet{misra2024aann} run the cleanest case for our
 purposes: they filter AANNs from training and show models still rate them,
 because related, less-rare constructions teach the pattern indirectly.
 Recent benchmark work probes the sample efficiency of these syntactic
-heuristics directly \citep{anonymous2026posh}. All of these fix the dose at
-either zero or ``all.'' We fill in the curve between.
+heuristics directly \citep{anonymous2026posh}. Most of these fix the dose at
+either zero or ``all''; the exception, \citet{oba2024widet}, injects a
+phenomenon at several counts and is the work we build on most directly. We
+differ in what we do with the resulting curve: rather than describing its
+shape in prose, we fit a four-parameter model and extract comparable
+learnability parameters, then use the dosing design to ask new questions
+about transfer, predictability, and memorization.
 
 \paragraph{The BabyLM setting.}
 Training on a developmentally plausible budget of words has become its own
@@ -225,11 +246,22 @@ generalization from memorization as a function of pretraining frequency
 dependence directly for grammatical constructions and fit it with an
 interpretable curve.
 
+\paragraph{Learning curves over training, not exposure.}
+A related strand fits curves to syntactic competence as a function of
+\emph{training steps} on a fixed corpus: \citet{bunzeck2024shapes} find
+non-uniform, sometimes non-monotone BLiMP learning curves, and
+\citet{chang2024curves} fit sigmoids and define a 50\%-surprisal ``age of
+acquisition.'' Our independent variable is different in kind --- the
+\emph{count} of a construction in the data, not wall-clock training --- so
+our \Efifty{} is an exposure threshold, not a temporal one. The two axes
+are complementary.
+
 \paragraph{Acceptability measurement.}
-We score acceptability with SLOR \citep{pauls2012slor}, which corrects a
-sentence's log-probability for word rarity, evaluated on minimal pairs in
-the BLiMP tradition \citep{warstadt2020blimp}. For our masked encoder we
-use the pseudo-log-likelihood variant standard for masked LMs.
+We score acceptability with SLOR \citep{pauls2012slor,lau2017acceptability},
+which corrects a sentence's log-probability for word rarity, evaluated on
+minimal pairs in the BLiMP tradition \citep{warstadt2020blimp}. For our
+masked encoder we use the pseudo-log-likelihood variant standard for masked
+LMs.
 
 % =====================================================================
 \section{Methods}
@@ -300,8 +332,9 @@ Implementation uses Hugging Face Transformers \citep{wolf2020transformers}.
 \subsection{SLOR evaluation}
 \label{sec:methods-slor}
 We measure acceptability with the syntactic log-odds-ratio
-\citep{pauls2012slor}, which corrects a sentence's log-probability for the
-fact that rare words drag it down regardless of grammaticality:
+\citep{pauls2012slor,lau2017acceptability}, which corrects a sentence's
+log-probability for the fact that rare words drag it down regardless of
+grammaticality:
 \begin{equation}
   \mathrm{SLOR}(s) = \frac{\log P(s) - \log P_{\mathrm{uni}}(s)}{|s|},
 \end{equation}
@@ -363,7 +396,7 @@ hypothesis-to-title mapping were all locked before any fit was inspected.
 Figure~\ref{fig:dose-response} shows fitted dose-response curves per
 construction, with per-seed lines, the mean, a bootstrap ribbon, and the
 Hill overlay. \resultpending{describe the overall curve shape and whether
-fits converged across cells; fill from results/hill_fits.csv}
+fits converged across cells; fill from \texttt{results/hill\_fits.csv}}
 
 \begin{figure}[t]
   \centering
@@ -482,6 +515,67 @@ another. \resultpending{do off-diagonal effects appear?}
       \resultpending{fig5\_collateral\_effects.pdf not yet generated}\vspace{2em}}}}
   \caption{Collateral effects: mean accuracy across train/eval pairs.}
   \label{fig:collateral}
+\end{figure}
+
+\subsection{Predicting the threshold from corpus properties}
+\label{sec:predictability}
+If \Efifty{} is a real learnability measure, prior corpus properties should
+predict it. We regress each construction's fitted \Efifty{} (and \Ezero,
+\hilln) on its attested frequency, slot-filler productivity, and surface
+unigram predictability (Figure~\ref{fig:predict}). With only four
+constructions this is exploratory, and we report it as such.
+\resultpending{which property tracks \Efifty, with the correlation; fill
+from results/predictability\_correlations.csv}
+
+\begin{figure}[t]
+  \centering
+  \IfFileExists{../results/figures/fig6_predictability.pdf}{%
+    \includegraphics[width=\columnwidth]{../results/figures/fig6_predictability.pdf}}{%
+    \fbox{\parbox{0.9\columnwidth}{\centering\vspace{2em}
+      \resultpending{fig6\_predictability.pdf not yet generated}\vspace{2em}}}}
+  \caption{Fitted \Efifty{} against the strongest corpus predictor
+    (constructions, mean over seeds). Exploratory, $n=4$.}
+  \label{fig:predict}
+\end{figure}
+
+\subsection{Cross-construction transfer}
+\label{sec:transfer}
+Because every model is evaluated on all four test sets, we can ask whether
+dosing one construction shifts acceptability on another.
+Figure~\ref{fig:transfer} reports the slope of each evaluated
+construction's accuracy against the (log) dose of each trained
+construction; the diagonal is the on-target effect, the off-diagonal is
+transfer. \resultpending{do off-diagonal slopes depart from zero?}
+
+\begin{figure}[t]
+  \centering
+  \IfFileExists{../results/figures/fig7_transfer_matrix.pdf}{%
+    \includegraphics[width=\columnwidth]{../results/figures/fig7_transfer_matrix.pdf}}{%
+    \fbox{\parbox{0.9\columnwidth}{\centering\vspace{2em}
+      \resultpending{fig7\_transfer\_matrix.pdf not yet generated}\vspace{2em}}}}
+  \caption{Transfer matrix: slope of eval-construction accuracy vs.\ the
+    dose of the trained construction.}
+  \label{fig:transfer}
+\end{figure}
+
+\subsection{Memorization versus generalization}
+\label{sec:generalization}
+We split each construction's test items by whether their lexical material
+overlaps the instances kept at a given dose, then fit dose-response
+separately for ``seen'' and ``novel'' fillers (Figure~\ref{fig:gen}). A
+novel-filler curve that still climbs with dose is evidence the model
+generalizes the construction rather than memorizing specific items.
+\resultpending{does the novel-filler curve track the seen-filler curve?}
+
+\begin{figure}[t]
+  \centering
+  \IfFileExists{../results/figures/fig8_generalization.pdf}{%
+    \includegraphics[width=\columnwidth]{../results/figures/fig8_generalization.pdf}}{%
+    \fbox{\parbox{0.9\columnwidth}{\centering\vspace{2em}
+      \resultpending{fig8\_generalization.pdf not yet generated}\vspace{2em}}}}
+  \caption{Dose-response for seen vs.\ novel lexical fillers, per
+    construction. The gap indexes memorization.}
+  \label{fig:gen}
 \end{figure}
 
 \subsection{Pre-registered decision}

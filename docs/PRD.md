@@ -16,7 +16,9 @@ Language models learn some grammatical constructions and not others, and the fie
 
 Prior filtered-corpus work — Misra & Mahowald (2024) on AANN, Patil et al. (2024) on construction ablation — answers a binary question. Does removing the construction hurt? Yes or no. That's a useful first cut, but it throws away the interesting structure. A construction the model nails after four examples and one it never gets even with thousands both register as "present" in an unfiltered corpus. Binary exposure can't tell them apart.
 
-Real acquisition isn't binary. A child doesn't flip from zero to fluent on the resultative; exposure accumulates and competence grows with it. If we want to model that, we need a continuous exposure axis and a curve that fits it. That's the whole move here: make exposure a continuous variable, measure the response at several points, and let the shape of the curve carry the theory.
+Real acquisition isn't binary. A child doesn't flip from zero to fluent on the resultative; exposure accumulates and competence grows with it. If we want to model that, we need to vary exposure across several levels and fit a curve to it.
+
+One paper already varies exposure across several counts: Oba et al. (2024, "Can Language Models Induce Grammatical Knowledge from Indirect Evidence?", EMNLP). They inject a phenomenon at 0/1/5/25/50/75/100 occurrences and plot accuracy — but they read the curve qualitatively and never fit a model or extract a number. **So our gap is not "first to vary exposure"; it's "first to fit a parametric (Hill) dose-response model and extract comparable learnability parameters" — `E50`, slope `n`, and the indirect-evidence floor `E0` — plus three analyses the dosing design enables (predictability of `E50`, cross-construction transfer, and a seen/novel-filler split for memorization vs. generalization).** See `research_audit.md` for the full novelty assessment and the must-cite/scoop-risk list.
 
 ## 3. Research questions
 

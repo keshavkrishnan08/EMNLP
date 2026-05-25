@@ -1,6 +1,12 @@
 % Bibliography for "Dose-Response Curves for Construction Learning in Small
 % Language Models" (EMNLP 2026 submission). Keys are referenced from main.tex
-% and supplementary.tex. Edit fields if a venue's canonical entry differs.
+% and supplementary.tex.
+%
+% All entries were verified against ACL Anthology / arXiv / publisher pages
+% (see docs/research_audit.md). Two keys keep cosmetically stale names for
+% citation stability: `lan2026llmsps` is a 2024 paper, and `anonymous2026posh`
+% is no longer anonymous (de-anonymised on arXiv) — the rendered fields below
+% are correct in both cases.
 
 @inproceedings{misra2024aann,
   title     = {Language Models Learn Rare Phenomena from Less Rare Phenomena:
@@ -8,8 +14,10 @@
   author    = {Misra, Kanishka and Mahowald, Kyle},
   booktitle = {Proceedings of the 2024 Conference on Empirical Methods in
                Natural Language Processing (EMNLP)},
+  pages     = {913--929},
   year      = {2024},
-  publisher = {Association for Computational Linguistics}
+  publisher = {Association for Computational Linguistics},
+  note      = {Outstanding Paper Award}
 }
 
 @article{patil2024fict,
@@ -19,29 +27,35 @@
                Lapastora, Andy and Shen, Peter and Wang, Lexie and
                Willrich, Clevis and Steinert-Threlkeld, Shane},
   journal   = {Transactions of the Association for Computational Linguistics},
+  volume    = {12},
+  pages     = {1597--1615},
   year      = {2024},
-  publisher = {MIT Press}
+  publisher = {MIT Press},
+  doi       = {10.1162/tacl_a_00720}
 }
 
-@inproceedings{leong2024passives,
-  title     = {Language Models Can Learn Implicit Multi-Hop Reasoning, but
-               Only If They Have Lots of Training Data: Indirect Evidence and
-               the Acquisition of the Passive},
+% Verified: the real Leong & Linzen (2024) passivization study. (An earlier
+% draft conflated this with Yao et al. 2025 on multi-hop reasoning — fixed.)
+@misc{leong2024passives,
+  title     = {Manipulating Language Models' Training Data to Study Syntactic
+               Constraint Learning: The Case of {E}nglish Passivization},
   author    = {Leong, Cara Su-Yi and Linzen, Tal},
-  booktitle = {Proceedings of the 2024 Conference on Empirical Methods in
-               Natural Language Processing (EMNLP)},
   year      = {2024},
-  publisher = {Association for Computational Linguistics}
+  eprint    = {2407.04593},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL}
 }
 
-@inproceedings{anonymous2026posh,
-  title     = {{PoSH}-Bench: Probing the Sample Efficiency of Syntactic
-               Heuristics in Pretrained Language Models},
-  author    = {{Anonymous}},
-  booktitle = {Under review},
+% De-anonymised on arXiv; cite the named version, not "anonymous / under review".
+@misc{anonymous2026posh,
+  title     = {A Unified Assessment of the Poverty of the Stimulus Argument for
+               Neural Language Models},
+  author    = {Yang, Xiulin and Bisazza, Arianna and Schneider, Nathan and
+               Wilcox, Ethan Gotlieb},
   year      = {2026},
-  note      = {Citation placeholder; replace with the published entry when
-               available.}
+  eprint    = {2602.09992},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL}
 }
 
 @inproceedings{warstadt2023babylm,
@@ -57,15 +71,17 @@
   publisher = {Association for Computational Linguistics}
 }
 
-@inproceedings{choshen2024babylm,
-  title     = {[Call for Papers] The Second {BabyLM} Challenge: Sample-Efficient
+@misc{choshen2024babylm,
+  title     = {[Call for Papers] The 2nd {BabyLM} Challenge: Sample-Efficient
                Pretraining on a Developmentally Plausible Corpus},
   author    = {Choshen, Leshem and Cotterell, Ryan and Hu, Michael Y. and
                Linzen, Tal and Mueller, Aaron and Ross, Candace and
                Warstadt, Alex and Wilcox, Ethan and Williams, Adina and
                Zhuang, Chengxu},
-  booktitle = {arXiv preprint arXiv:2404.06214},
-  year      = {2024}
+  year      = {2024},
+  eprint    = {2404.06214},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL}
 }
 
 @inproceedings{samuel2023ltgbert,
@@ -75,6 +91,7 @@
                Velldal, Erik},
   booktitle = {Findings of the Association for Computational Linguistics: EACL
                2023},
+  pages     = {1954--1974},
   year      = {2023},
   publisher = {Association for Computational Linguistics}
 }
@@ -85,6 +102,7 @@
                and Mahowald, Kyle and Potts, Christopher},
   booktitle = {Proceedings of the 62nd Annual Meeting of the Association for
                Computational Linguistics (ACL)},
+  pages     = {14691--14714},
   year      = {2024},
   publisher = {Association for Computational Linguistics}
 }
@@ -108,6 +126,7 @@
                and Levy, Roger},
   booktitle = {Proceedings of the 58th Annual Meeting of the Association for
                Computational Linguistics (ACL)},
+  pages     = {1725--1744},
   year      = {2020},
   publisher = {Association for Computational Linguistics}
 }
@@ -120,6 +139,7 @@
                and Sch{\"u}tze, Hinrich},
   booktitle = {Proceedings of the 2022 Conference on Empirical Methods in
                Natural Language Processing (EMNLP)},
+  pages     = {10859--10882},
   year      = {2022},
   publisher = {Association for Computational Linguistics}
 }
@@ -141,7 +161,8 @@
   number    = {3},
   pages     = {532--568},
   year      = {2004},
-  publisher = {Linguistic Society of America}
+  publisher = {Linguistic Society of America},
+  doi       = {10.1353/lan.2004.0129}
 }
 
 @book{tomasello2003constructing,
@@ -161,24 +182,30 @@
   address   = {Cambridge, MA}
 }
 
+% Verified author list: Hu, Petty, Shi, Merrill, Linzen (NOT Hu/Mueller/Wilcox).
 @inproceedings{hu2025circuits,
   title     = {Between Circuits and {C}homsky: Pre-Pretraining on Formal
                Languages Imparts Linguistic Biases},
-  author    = {Hu, Michael Y. and Mueller, Aaron and Wilcox, Ethan and
-               Linzen, Tal},
+  author    = {Hu, Michael Y. and Petty, Jackson and Shi, Chuan and
+               Merrill, William and Linzen, Tal},
   booktitle = {Proceedings of the 63rd Annual Meeting of the Association for
                Computational Linguistics (ACL)},
+  pages     = {9691--9709},
   year      = {2025},
   publisher = {Association for Computational Linguistics}
 }
 
+% Verified: the Rozner/Weissweiler/Shain causal-intervention paper
+% (NOT a "Findings of the Third BabyLM Challenge" report, which does not exist).
 @inproceedings{rozner2025babylm,
-  title     = {Findings of the Third {BabyLM} Challenge},
-  author    = {Rozner, Josh and Charpentier, Lucas and others},
-  booktitle = {Proceedings of the BabyLM Challenge},
+  title     = {{BabyLM}'s First Constructions: Causal Interventions Provide a
+               Signal of Learning},
+  author    = {Rozner, Joshua and Weissweiler, Leonie and Shain, Cory},
+  booktitle = {Proceedings of the 2025 Conference on Empirical Methods in
+               Natural Language Processing (EMNLP)},
+  pages     = {2237--2249},
   year      = {2025},
-  publisher = {Association for Computational Linguistics},
-  note      = {Citation placeholder; update fields against the final proceedings.}
+  publisher = {Association for Computational Linguistics}
 }
 
 @inproceedings{pauls2012slor,
@@ -186,8 +213,23 @@
   author    = {Pauls, Adam and Klein, Dan},
   booktitle = {Proceedings of the 50th Annual Meeting of the Association for
                Computational Linguistics (ACL)},
+  pages     = {959--968},
   year      = {2012},
   publisher = {Association for Computational Linguistics}
+}
+
+% Standard companion cite for SLOR as an acceptability metric.
+@article{lau2017acceptability,
+  title     = {Grammaticality, Acceptability, and Probability: A Probabilistic
+               View of Linguistic Knowledge},
+  author    = {Lau, Jey Han and Clark, Alexander and Lappin, Shalom},
+  journal   = {Cognitive Science},
+  volume    = {41},
+  number    = {5},
+  pages     = {1202--1241},
+  year      = {2017},
+  publisher = {Wiley},
+  doi       = {10.1111/cogs.12414}
 }
 
 @inproceedings{mahowald2023aann,
@@ -196,26 +238,32 @@
   author    = {Mahowald, Kyle},
   booktitle = {Proceedings of the 17th Conference of the European Chapter of
                the Association for Computational Linguistics (EACL)},
+  pages     = {265--273},
   year      = {2023},
   publisher = {Association for Computational Linguistics}
 }
 
+% Verified: Linguistic Inquiry (2024), "...the Argument FROM the Poverty of the
+% Stimulus" by Lan, Chemla & Katzir. (Key name keeps "2026" for cite stability.)
 @article{lan2026llmsps,
-  title     = {Large Language Models and the Poverty of the Stimulus: A
-               Reassessment},
-  author    = {Lan, Nur and others},
-  journal   = {Computational Linguistics},
-  year      = {2026},
+  title     = {Large Language Models and the Argument from the Poverty of the
+               Stimulus},
+  author    = {Lan, Nur and Chemla, Emmanuel and Katzir, Roni},
+  journal   = {Linguistic Inquiry},
+  year      = {2024},
   publisher = {MIT Press},
-  note      = {Citation placeholder; update fields when the article is finalized.}
+  doi       = {10.1162/ling_a_00533}
 }
 
-@inproceedings{morris2025memorization,
+@misc{morris2025memorization,
   title     = {How Much Do Language Models Memorize?},
-  author    = {Morris, John X. and others},
-  booktitle = {arXiv preprint},
+  author    = {Morris, John X. and Sitawarin, Chawin and Guo, Chuan and
+               Kokhlikyan, Narine and Suh, G. Edward and Rush, Alexander M. and
+               Chaudhuri, Kamalika and Mahloujifar, Saeed},
   year      = {2025},
-  note      = {Citation placeholder; update with the published venue.}
+  eprint    = {2505.24832},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL}
 }
 
 @inproceedings{kandpal2023longtail,
@@ -224,24 +272,33 @@
                Wallace, Eric and Raffel, Colin},
   booktitle = {Proceedings of the 40th International Conference on Machine
                Learning (ICML)},
-  year      = {2023},
-  publisher = {PMLR}
+  series    = {PMLR},
+  volume    = {202},
+  pages     = {15696--15707},
+  year      = {2023}
 }
 
-@article{wang2024memorization,
-  title     = {Generalization vs. Memorization: Tracing Language Models'
+% Verified author order (arXiv): Xinyi Wang, Antonis Antoniades, Yanai Elazar, ...
+@misc{wang2024memorization,
+  title     = {Generalization v.s. Memorization: Tracing Language Models'
                Capabilities Back to Pretraining Data},
-  author    = {Wang, Antonis and others},
-  journal   = {arXiv preprint},
+  author    = {Wang, Xinyi and Antoniades, Antonis and Elazar, Yanai and
+               Amayuelas, Alfonso and Albalak, Alon and Zhang, Kexun and
+               Wang, William Yang},
   year      = {2024},
-  note      = {Citation placeholder; update with the published venue.}
+  eprint    = {2407.14985},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  note      = {Published at ICLR 2025}
 }
 
-@article{evanson2023acquisition,
+@inproceedings{evanson2023acquisition,
   title     = {Language Acquisition: Do Children and Language Models Follow
                Similar Learning Stages?},
   author    = {Evanson, Linnea and Lakretz, Yair and King, Jean-R{\'e}mi},
-  journal   = {Findings of the Association for Computational Linguistics: ACL 2023},
+  booktitle = {Findings of the Association for Computational Linguistics: ACL
+               2023},
+  pages     = {12205--12218},
   year      = {2023},
   publisher = {Association for Computational Linguistics}
 }
@@ -253,6 +310,7 @@
                and Manning, Christopher D.},
   booktitle = {Proceedings of the 58th Annual Meeting of the Association for
                Computational Linguistics: System Demonstrations},
+  pages     = {101--108},
   year      = {2020},
   publisher = {Association for Computational Linguistics}
 }
@@ -276,4 +334,46 @@
   year      = {1993},
   publisher = {Chapman \& Hall/CRC},
   address   = {New York}
+}
+
+% ---------------------------------------------------------------------------
+% Added after the literature audit (docs/research_audit.md): the closest prior
+% work on graded exposure, plus the two syntactic-learning-curve papers we must
+% distinguish from (their x-axis is training steps, ours is exposure count).
+% ---------------------------------------------------------------------------
+
+% THE closest prior work: a multi-level exposure sweep over construction counts,
+% but only qualitative curves — no parametric fit, no extracted threshold.
+@inproceedings{oba2024widet,
+  title     = {Can Language Models Induce Grammatical Knowledge from Indirect
+               Evidence?},
+  author    = {Oba, Miyu and Oseki, Yohei and Fukatsu, Akiyo and Haga, Akari
+               and Ouchi, Hiroki and Watanabe, Taro and Sugawara, Saku},
+  booktitle = {Proceedings of the 2024 Conference on Empirical Methods in
+               Natural Language Processing (EMNLP)},
+  year      = {2024},
+  publisher = {Association for Computational Linguistics},
+  eprint    = {2410.06022},
+  archivePrefix = {arXiv}
+}
+
+@inproceedings{bunzeck2024shapes,
+  title     = {Fifty Shapes of {BLiMP}: Syntactic Learning Curves in Language
+               Models Are Not Uniform, but Sometimes Unruly},
+  author    = {Bunzeck, Bastian and Zarrie{\ss}, Sina},
+  booktitle = {Proceedings of the Workshop on Cognitive Modeling and
+               Computational Linguistics (CMCL)},
+  year      = {2024},
+  publisher = {Association for Computational Linguistics}
+}
+
+@article{chang2024curves,
+  title     = {Characterizing Learning Curves During Language Model
+               Pre-Training: Learning, Forgetting, and Stability},
+  author    = {Chang, Tyler A. and Bergen, Benjamin K.},
+  journal   = {Transactions of the Association for Computational Linguistics},
+  volume    = {12},
+  year      = {2024},
+  publisher = {MIT Press},
+  doi       = {10.1162/tacl_a_00708}
 }

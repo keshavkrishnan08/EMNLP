@@ -53,6 +53,21 @@ CSV_FIELDS = (
     "std_error",
 )
 
+# Columns in results/eval_per_item.csv. This is the additive, per-minimal-pair
+# log that the memorization-vs-generalization analysis reads. It records the two
+# raw SLOR scores so a downstream analysis can re-derive correctness or do
+# anything else with the margins — the aggregate CSV throws those away.
+PER_ITEM_FIELDS = (
+    "model_construction",
+    "dose",
+    "seed",
+    "eval_construction",
+    "item_id",
+    "slor_good",
+    "slor_bad",
+    "correct",
+)
+
 # Pilot sanity band: the AANN model trained on the full dose at seed 42 should
 # replicate Misra & Mahowald (2024) on AANN items. Outside this and something's
 # off — we warn rather than crash, since a single odd run shouldn't kill a sweep.
@@ -251,6 +266,54 @@ def _append_row(csv_path: Path, row: dict[str, Any]) -> None:
         writer.writerow(row)
 
 
+def _append_per_item_rows(csv_path: Path, rows: list[dict[str, Any]]) -> None:
+    """Append a batch of per-item rows, writing the header first if file is new.
+
+    We write a whole (model, eval-construction) block at once rather than row by
+    row. That keeps the per-item file's resume granularity identical to the
+    aggregate's — a block is present in both files or in neither — so the two
+    never drift out of sync after a crash. The header is the PER_ITEM_FIELDS
+    constant so the writer and any reader agree on column order.
+    """
+    if not rows:
+        return
+    new_file = not csv_path.exists()
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(csv_path, "a", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=PER_ITEM_FIELDS)
+        if new_file:
+            writer.writeheader()
+        writer.writerows(rows)
+
+
+def _per_item_rows(
+    run_info: ModelRun,
+    eval_construction: str,
+    scored: list[tuple[str, float, float]],
+) -> list[dict[str, Any]]:
+    """Turn (item_id, slor_good, slor_bad) triples into per-item CSV rows.
+
+    Pulled out as its own pure function so a test can exercise the row shape
+    without torch in the room — feed it mock SLOR values and check the columns.
+    ``correct`` mirrors the aggregate rule exactly: strictly good > bad.
+    """
+    rows: list[dict[str, Any]] = []
+    for item_id, good, bad in scored:
+        rows.append(
+            {
+                "model_construction": run_info.construction,
+                "dose": run_info.dose,
+                "seed": run_info.seed,
+                "eval_construction": eval_construction,
+                "item_id": item_id,
+                "slor_good": round(float(good), 6),
+                "slor_bad": round(float(bad), 6),
+                "correct": int(good > bad),
+            }
+        )
+    return rows
+
+
 def evaluate_pair_set(
     model: Any,
     tokenizer: Any,
@@ -259,8 +322,14 @@ def evaluate_pair_set(
     unigram_counts,
     *,
     mask_batch_size: int,
-) -> tuple[int, int]:
-    """Score one model on one construction's pairs. Returns (n_pairs, n_correct).
+) -> tuple[int, int, list[tuple[str, float, float]]]:
+    """Score one model on one construction's pairs.
+
+    Returns ``(n_pairs, n_correct, scored)`` where ``scored`` is one
+    ``(item_id, slor_good, slor_bad)`` triple per pair. The triples come free —
+    they're the exact same two forward passes the accuracy count already does,
+    just recorded instead of discarded. The aggregate caller ignores them; the
+    per-item writer keeps them.
 
     Correct means the grammatical sentence wins on SLOR. Ties (exactly equal
     scores) count as wrong — we want strictly better, and exact ties almost
@@ -269,14 +338,16 @@ def evaluate_pair_set(
     from drc.eval.slor import slor
 
     n_correct = 0
+    scored: list[tuple[str, float, float]] = []
     for item in items:
         good = slor(model, tokenizer, item.good_sentence, unigram_counts,
                     mask_batch_size=mask_batch_size, device=device)
         bad = slor(model, tokenizer, item.bad_sentence, unigram_counts,
                    mask_batch_size=mask_batch_size, device=device)
+        scored.append((item.item_id, good, bad))
         if good > bad:
             n_correct += 1
-    return len(items), n_correct
+    return len(items), n_correct, scored
 
 
 def _dose_corpus_path(config: dict[str, Any], config_path: Path,
@@ -290,8 +361,15 @@ def run(
     config_path: Path,
     only_construction: str | None = None,
     mask_batch_size: int = 64,
+    per_item: bool = True,
 ) -> None:
-    """Evaluate every discovered model on all four construction test sets."""
+    """Evaluate every discovered model on all four construction test sets.
+
+    With ``per_item`` on (the default) we also stream every pair's two SLOR
+    scores to ``results/eval_per_item.csv``. That file feeds the
+    memorization-vs-generalization split; the aggregate CSV is untouched either
+    way, so existing readers and tests keep working.
+    """
     from drc.eval.slor import build_unigram_counts
 
     config = load_config(config_path)
@@ -300,6 +378,7 @@ def run(
     results_root = resolve_path(config_path, config["paths"]["results"])
     tokenizer_path = resolve_path(config_path, config["paths"]["tokenizer"])
     csv_path = results_root / "eval_results.csv"
+    per_item_path = results_root / "eval_per_item.csv"
 
     # Load every construction's minimal pairs once; reused across all models.
     eval_sets: dict[str, list[EvalItem]] = {}
@@ -363,7 +442,7 @@ def run(
 
         for eval_construction in pending:
             items = eval_sets[eval_construction]
-            n_pairs, n_correct = evaluate_pair_set(
+            n_pairs, n_correct, scored = evaluate_pair_set(
                 model, tokenizer, device, items, unigram_counts,
                 mask_batch_size=mask_batch_size,
             )
@@ -378,6 +457,14 @@ def run(
                 "accuracy": round(accuracy, 6),
                 "std_error": round(_binomial_std_error(accuracy, n_pairs), 6),
             }
+            # Write the per-item block first, then the aggregate row. The
+            # aggregate row is the resume marker: if it's present, the matching
+            # per-item block was already flushed, so we never double-write items.
+            if per_item:
+                _append_per_item_rows(
+                    per_item_path,
+                    _per_item_rows(run_info, eval_construction, scored),
+                )
             _append_row(csv_path, row)
             logger.info("  %s: %d/%d = %.3f",
                         eval_construction, n_correct, n_pairs, accuracy)
@@ -436,6 +523,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--mask-batch-size", type=int, default=64,
         help="Masked positions per forward pass in SLOR. Lower if you hit OOM.",
     )
+    parser.add_argument(
+        "--per-item", dest="per_item", action="store_true", default=True,
+        help="Also write results/eval_per_item.csv with each pair's SLOR scores "
+             "(default: on). Feeds the generalization analysis.",
+    )
+    parser.add_argument(
+        "--no-per-item", dest="per_item", action="store_false",
+        help="Skip the per-item CSV; write only the aggregate eval_results.csv.",
+    )
     return parser
 
 
@@ -446,7 +542,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = _build_parser().parse_args(argv)
     run(args.config, only_construction=args.construction,
-        mask_batch_size=args.mask_batch_size)
+        mask_batch_size=args.mask_batch_size, per_item=args.per_item)
 
 
 if __name__ == "__main__":

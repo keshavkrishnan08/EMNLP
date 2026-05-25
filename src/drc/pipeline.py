@@ -326,7 +326,25 @@ def default_phases(config_path: Path, single_gpu: bool = False) -> list[Stage]:
         Stage(
             "figures", cli("drc.analysis.figures"),
             is_done=lambda: len(list((results_dir / "figures").glob("fig*.pdf"))) >= 5,
-            requires=("hill",), description="render the five paper figures",
+            requires=("hill",), description="render the core paper figures",
+        ),
+        # The three analyses below widen the contribution beyond the closest
+        # prior work (Oba et al. 2024), and need no new training — they reuse the
+        # eval outputs and fitted curves.
+        Stage(
+            "transfer", cli("drc.analysis.transfer"),
+            is_done=lambda: (results_dir / "transfer_matrix.csv").exists(),
+            requires=("eval",), description="cross-construction transfer dose-response",
+        ),
+        Stage(
+            "predictability", cli("drc.analysis.predictability"),
+            is_done=lambda: (results_dir / "predictability.csv").exists(),
+            requires=("hill",), description="predict E50 from corpus properties (RQ4)",
+        ),
+        Stage(
+            "generalization", cli("drc.analysis.generalization"),
+            is_done=lambda: (results_dir / "generalization.csv").exists(),
+            requires=("eval",), description="memorization vs generalization (seen/novel fillers)",
         ),
     ]
 
