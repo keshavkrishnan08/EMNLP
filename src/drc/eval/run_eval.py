@@ -57,13 +57,6 @@ CSV_FIELDS = (
 # log that the memorization-vs-generalization analysis reads. It records the two
 # raw SLOR scores so a downstream analysis can re-derive correctness or do
 # anything else with the margins — the aggregate CSV throws those away.
-#
-# The trailing three columns are a *second* acceptability measure, the plain
-# length-normalised pseudo-log-likelihood (mean-LP) with no unigram correction.
-# It rides along for free: it's already computed inside SLOR, so recording it
-# costs nothing and lets the measure-robustness check show the dose-response
-# doesn't hinge on the SLOR metric specifically. ``correct_meanlp`` mirrors
-# ``correct`` but scores the pair on mean-LP instead.
 PER_ITEM_FIELDS = (
     "model_construction",
     "dose",
@@ -73,9 +66,6 @@ PER_ITEM_FIELDS = (
     "slor_good",
     "slor_bad",
     "correct",
-    "meanlp_good",
-    "meanlp_bad",
-    "correct_meanlp",
 )
 
 # Pilot sanity band: the AANN model trained on the full dose at seed 42 should
@@ -299,27 +289,16 @@ def _append_per_item_rows(csv_path: Path, rows: list[dict[str, Any]]) -> None:
 def _per_item_rows(
     run_info: ModelRun,
     eval_construction: str,
-    scored: list[tuple],
+    scored: list[tuple[str, float, float]],
 ) -> list[dict[str, Any]]:
-    """Turn scored minimal pairs into per-item CSV rows.
+    """Turn (item_id, slor_good, slor_bad) triples into per-item CSV rows.
 
     Pulled out as its own pure function so a test can exercise the row shape
-    without torch in the room — feed it mock scores and check the columns. Each
-    tuple is ``(item_id, slor_good, slor_bad)`` or, when the mean-LP measure is
-    captured, ``(item_id, slor_good, slor_bad, meanlp_good, meanlp_bad)``. We
-    accept both so the older three-element form keeps working; missing mean-LP
-    values come out blank rather than a fabricated zero.
-
-    ``correct`` mirrors the aggregate rule exactly: strictly good > bad on SLOR.
-    ``correct_meanlp`` is the same rule on the second measure, left blank when
-    no mean-LP scores were supplied.
+    without torch in the room — feed it mock SLOR values and check the columns.
+    ``correct`` mirrors the aggregate rule exactly: strictly good > bad.
     """
     rows: list[dict[str, Any]] = []
-    for entry in scored:
-        item_id, good, bad = entry[0], entry[1], entry[2]
-        has_meanlp = len(entry) >= 5
-        ml_good = float(entry[3]) if has_meanlp else None
-        ml_bad = float(entry[4]) if has_meanlp else None
+    for item_id, good, bad in scored:
         rows.append(
             {
                 "model_construction": run_info.construction,
@@ -330,9 +309,6 @@ def _per_item_rows(
                 "slor_good": round(float(good), 6),
                 "slor_bad": round(float(bad), 6),
                 "correct": int(good > bad),
-                "meanlp_good": round(ml_good, 6) if has_meanlp else "",
-                "meanlp_bad": round(ml_bad, 6) if has_meanlp else "",
-                "correct_meanlp": int(ml_good > ml_bad) if has_meanlp else "",
             }
         )
     return rows
@@ -346,34 +322,29 @@ def evaluate_pair_set(
     unigram_counts,
     *,
     mask_batch_size: int,
-) -> tuple[int, int, list[tuple[str, float, float, float, float]]]:
-    """Score one model on one construction's pairs under both measures.
+) -> tuple[int, int, list[tuple[str, float, float]]]:
+    """Score one model on one construction's pairs.
 
     Returns ``(n_pairs, n_correct, scored)`` where ``scored`` is one
-    ``(item_id, slor_good, slor_bad, meanlp_good, meanlp_bad)`` tuple per pair.
-    Both scores come from the *same* forward passes — SLOR and the plain
-    length-normalised PLL (mean-LP) differ only by the unigram subtraction, so
-    grabbing mean-LP is free. The aggregate caller uses SLOR for ``n_correct``;
-    the per-item writer keeps everything.
+    ``(item_id, slor_good, slor_bad)`` triple per pair. The triples come free —
+    they're the exact same two forward passes the accuracy count already does,
+    just recorded instead of discarded. The aggregate caller ignores them; the
+    per-item writer keeps them.
 
     Correct means the grammatical sentence wins on SLOR. Ties (exactly equal
     scores) count as wrong — we want strictly better, and exact ties almost
-    never happen with float scores anyway.
+    never happen with float SLOR anyway.
     """
-    from drc.eval.slor import slor_and_meanlp
+    from drc.eval.slor import slor
 
     n_correct = 0
-    scored: list[tuple[str, float, float, float, float]] = []
+    scored: list[tuple[str, float, float]] = []
     for item in items:
-        good, ml_good = slor_and_meanlp(
-            model, tokenizer, item.good_sentence, unigram_counts,
-            mask_batch_size=mask_batch_size, device=device,
-        )
-        bad, ml_bad = slor_and_meanlp(
-            model, tokenizer, item.bad_sentence, unigram_counts,
-            mask_batch_size=mask_batch_size, device=device,
-        )
-        scored.append((item.item_id, good, bad, ml_good, ml_bad))
+        good = slor(model, tokenizer, item.good_sentence, unigram_counts,
+                    mask_batch_size=mask_batch_size, device=device)
+        bad = slor(model, tokenizer, item.bad_sentence, unigram_counts,
+                   mask_batch_size=mask_batch_size, device=device)
+        scored.append((item.item_id, good, bad))
         if good > bad:
             n_correct += 1
     return len(items), n_correct, scored
