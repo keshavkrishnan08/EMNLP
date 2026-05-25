@@ -8,34 +8,36 @@ any prior artifacts, detects the GPU count, and calls `run_pipeline`.
 
 ## The four notebooks
 
-| Notebook | What it does | Time (dual-T4) |
-|----------|--------------|----------------|
-| **`kaggle_00_smoke.ipynb`** | **Run this first.** The *entire* pipeline on a tiny config (`configs/smoke.yaml`) — small corpus slice, 2-layer model, 1 epoch, 15 tiny runs. Verifies there are no environment/wiring errors before you spend real compute. Outputs go to `*/smoke/` so they never touch the real run. | **~10 min** |
-| **`kaggle_01_results.ipynb`** | The heavy run: download → parse → audit → dose corpora → tokenizer → 63-model training sweep → SLOR + n-gram eval. Produces all raw results, then a health-check cell tells you whether to trust them or re-run. | **~10 h** |
-| **`kaggle_02_analysis.ipynb`** | Fast, CPU-only: Hill fits, the E₀ indirect-evidence index, model comparison, clustering, transfer, predictability, generalization, the decision rule, and all figures. Reads the CSVs from notebook 01 — re-run and tweak freely without retraining. | **~minutes** |
-| `kaggle_run_all.ipynb` | Every stage in one session. Right at the ~12 h cap, so best for resuming a mostly-finished pipeline rather than a fresh run. | ~12 h |
+| Notebook | What it does | Time (single T4) |
+|----------|--------------|------------------|
+| **`kaggle_00_smoke.ipynb`** | **Run this first.** The *entire* pipeline on a tiny config (`configs/smoke.yaml`) — small corpus slice, 2-layer model, 1 epoch. Verifies there are no environment/wiring errors before you spend real compute. Outputs go to `*/smoke/`, separate from the real run. | **~10 min** |
+| **`kaggle_01a_data_train.ipynb`** | Session 1: download → parse → audit → dose corpora → tokenizer → 63-model sweep. Ends with a training health check. Resumable — re-run if the 12 h cap cuts it off. | **~11–12 h** |
+| **`kaggle_01b_eval_analysis.ipynb`** | Session 2: SLOR + n-gram eval, then Hill fits, E₀ index, model comparison, clustering, transfer, predictability, generalization, decision, and all figures. Attach 01a's output first. | **~2–3 h** |
+| `kaggle_run_all.ipynb` | Every stage in one session — for dual-GPU or resuming a near-finished pipeline. | ~12 h |
 
 ## How to use them
 
-1. **Set the accelerator to GPU T4 x2** (Settings → Accelerator → *GPU T4 x2*).
-2. **Edit `REPO_URL`** in the setup cell to your repo
-   (`git@github.com:keshavkrishnan08/EMNLP.git` or its HTTPS form), or upload the
-   repo as a Kaggle dataset — the setup cell finds either.
-3. **Run `kaggle_00_smoke` first.** If its dashboard and health check are clean,
-   the full run should work too.
-4. **Run `kaggle_01_results`** to completion, then *Save Version*. Its
-   `/kaggle/working` becomes a notebook-output dataset.
-5. **Run `kaggle_02_analysis`**: add notebook 01's output as an input
-   (*Add Input → Your Datasets*); the restore cell pulls in `results/` and
-   `models/`, and the analysis stages run in minutes.
+1. **Set the accelerator to GPU T4 x2** (Settings → Accelerator → *GPU T4 x2*),
+   and **turn Internet ON** (Settings → Internet) — the clone and the BabyLM
+   download both need it.
+2. **For one T4:** set `FORCE_SINGLE_GPU = True` in the GPU-detect cell — it runs
+   sequentially on one card (fast fp16, no parallel orchestration).
+3. **Run `kaggle_00_smoke` first.** If its dashboard + health check are clean,
+   the real run will work too.
+4. **Run `kaggle_01a_data_train`** to completion, then *Save Version* (its
+   `/kaggle/working` becomes a notebook-output dataset). Re-run if the cap stops
+   it — finished models are skipped.
+5. **Run `kaggle_01b_eval_analysis`**: *Add Input → Your Datasets* → 01a's output;
+   the restore cell pulls in the trained `models/` and `data/`, then it evaluates
+   and produces all figures.
 
 ## Notes
 
-- **T4 has no bf16.** Edit `precision: bf16 → fp16` in `configs/base.yaml` before
-  the real run (the GPU-detect cell reminds you). The smoke config already uses
-  `fp16`.
-- **Resumable.** Every stage is its own subprocess and marks itself done on
-  success, so a 12 h timeout or a crash costs only the in-flight work — just
-  re-run the notebook and finished stages skip.
+- **Precision is automatic** — bf16 where supported, fp16 on a T4 (GradScaler),
+  fp32 on CPU. No need to edit `configs/base.yaml`.
+- **Epochs are set to 14** in `configs/base.yaml` to fit a single-GPU budget;
+  bump toward 20 for a final/camera-ready run if you have the compute.
+- **Resumable.** Every stage is its own subprocess and marks itself done, so a
+  timeout or crash costs only the in-flight work — re-run and finished work skips.
 - **Nothing is fabricated.** A blocked or failed stage produces no numbers; it
-  says so in the dashboard and the rest of the pipeline proceeds where it can.
+  says so and the rest proceeds.

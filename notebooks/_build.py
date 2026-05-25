@@ -106,28 +106,26 @@ stopped instead of redoing hours of work.
   fp16 (with a GradScaler) on a T4, and fp32 on CPU — so you don't need to edit
   `configs/base.yaml`, even though it says `bf16`.
 
-## Two notebooks
+## The notebooks (split for a single-GPU, two-session run)
 
-The pipeline is split into just two notebooks so the expensive, hard-to-redo
-work is separated from the cheap work you'll iterate on:
+A single-T4 run is ~13-14 h, over Kaggle's 12 h cap, so the work is split so each
+half fits one session:
 
-1. **`kaggle_01_results`** — the heavy run (~10 h on dual-T4): download, parse,
-   audit, dose corpora, tokenizer, the 63-model training sweep, and SLOR +
-   n-gram evaluation. When it finishes you have all the raw results
-   (`results/eval_results.csv`, the sweep manifest, per-run perplexities) and a
-   summary that tells you whether training and eval looked healthy — so you can
-   decide **before** doing anything else whether you need to re-run.
-2. **`kaggle_02_analysis`** — the fast run (minutes, CPU): Hill fits, the E0
-   indirect-evidence index, model comparison, clustering, transfer,
-   predictability, generalization, the decision rule, and all figures. It reads
-   the CSVs the first notebook produced, so you can re-run and tweak the analysis
-   freely without ever retraining.
+1. **`kaggle_00_smoke`** — the whole pipeline on a tiny config (~10 min). Run it
+   first to confirm every stage works before the long run.
+2. **`kaggle_01a_data_train`** — session 1 (the long pole): download, parse,
+   audit, dose corpora, tokenizer, and the 63-model training sweep. Ends with a
+   health check on the trained models. If the 12 h cap cuts it off, just re-run —
+   finished models are skipped, so it resumes.
+3. **`kaggle_01b_eval_analysis`** — session 2 (~2-3 h): SLOR + n-gram evaluation,
+   then all the analysis (Hill fits, E0 index, transfer, predictability,
+   generalization, decision) and figures.
 
-They chain through Kaggle's **notebook-output datasets**: run
-`kaggle_01_results` to completion, *Save Version*, then in `kaggle_02_analysis`
-add that output as an input (*Add Input -> Your Datasets*). The
-**restore-prior-artifacts** cell copies its `data/`, `models/`, and `results/`
-into the working repo, so the analysis stages find everything they need.
+They chain through Kaggle's **notebook-output datasets**: run `01a` to completion,
+*Save Version*, then in `01b` add that output as an input (*Add Input -> Your
+Datasets*). The **restore-prior-artifacts** cell copies its `data/`, `models/`,
+and `results/` into the working repo so `01b` finds the trained models.
+(`kaggle_run_all` runs everything in one go, for reference / dual-GPU.)
 
 Nothing here fabricates results. A blocked or failed stage produces no numbers —
 it just says so in the dashboard and lets the rest proceed.
@@ -639,11 +637,10 @@ def make_run_all() -> list[dict]:
             "DRC — Run the whole pipeline (single session)",
             "This is the **master** notebook: every stage end to end (data, "
             "training, evaluation, and all analysis/figures) in one go. It's "
-            "right at Kaggle's ~12-hour session cap, so it suits a re-run that "
-            "resumes a mostly-finished pipeline. For a fresh run, prefer the two "
-            "split notebooks — `kaggle_01_results` (the ~10 h heavy run) then "
-            "`kaggle_02_analysis` (fast, re-runnable) — which separate the "
-            "expensive work from the work you'll iterate on.",
+            "right at Kaggle's ~12-hour session cap, so it suits dual-GPU or a "
+            "re-run that resumes a mostly-finished pipeline. For a single-T4 run, "
+            "prefer the split notebooks — `kaggle_01a_data_train` (session 1) then "
+            "`kaggle_01b_eval_analysis` (session 2) — so each half fits a session.",
             "**Scope:** every stage (`only=None`).",
         ),
         # The master needs everything: ML stack + data deps + analysis deps.
@@ -660,33 +657,31 @@ def make_run_all() -> list[dict]:
     ]
 
 
-# All stages that produce the raw results — everything expensive and hard to
-# redo. This is the ~10-hour notebook.
-_RESULTS_STAGES = [
-    "download", "parse", "audit", "dose", "tokenizer", "train", "eval", "ngram",
+# Session 1 — the long pole: data prep through the 63-model training sweep.
+_DATA_TRAIN_STAGES = [
+    "download", "parse", "audit", "dose", "tokenizer", "train",
 ]
-# Everything that only reads the result CSVs — cheap, CPU, safe to re-run.
-_ANALYSIS_STAGES = [
-    "hill", "model_comparison", "clustering", "transfer", "predictability",
-    "generalization", "indirect_evidence", "decision", "figures",
+# Session 2 — evaluation + all analysis + figures (reads session 1's models).
+_EVAL_ANALYSIS_STAGES = [
+    "eval", "ngram", "hill", "model_comparison", "clustering", "transfer",
+    "predictability", "generalization", "indirect_evidence", "decision", "figures",
 ]
 
 
-def make_results() -> list[dict]:
+def make_data_train() -> list[dict]:
     return [
         intro_md(
-            "DRC — Results: data, training, evaluation (the heavy run)",
-            "This is the **one big notebook**. It does everything expensive and "
-            "hard to redo, end to end: download, parse, audit, build the dose "
-            "corpora, train the tokenizer, run the **63-model pilot-gated sweep**, "
-            "and evaluate (SLOR + n-gram). Budget **~10 hours on dual-T4**. When "
-            "it finishes you have all the raw results, and the health-check cell "
-            "at the bottom tells you whether to trust them or re-run. Each model "
-            "trains in its own subprocess and leaves a `metrics.json` when done, "
-            "so a timeout or crash costs you only the in-flight runs — just re-run "
-            "to continue. *Save Version* when it's green, then feed its output to "
-            "`kaggle_02_analysis`.",
-            "**Scope:** `only=" + json.dumps(_RESULTS_STAGES) + "`.",
+            "DRC 01a — Data + training (session 1, the long run)",
+            "Session 1 of two. Does the expensive, hard-to-redo work: download, "
+            "parse, audit, build the dose corpora, train the tokenizer, and run "
+            "the **63-model pilot-gated sweep**. On one T4 (set `FORCE_SINGLE_GPU "
+            "= True` below) budget ~11-12 h. Each model trains in its own "
+            "subprocess and leaves a `metrics.json` when done, so if the 12 h cap "
+            "cuts you off, just **re-run this notebook** — finished models are "
+            "skipped and it resumes. The health-check cell at the end tells you if "
+            "training looked sane. When it's green, *Save Version* and feed its "
+            "output dataset to `kaggle_01b_eval_analysis`.",
+            "**Scope:** `only=" + json.dumps(_DATA_TRAIN_STAGES) + "`.",
         ),
         setup_code(
             extras="train",
@@ -694,40 +689,41 @@ def make_results() -> list[dict]:
             extras_comment=_TRAIN_COMMENT,
         ),
         deps_code(["stanza"]),
-        # Usually nothing to restore (this is the first notebook), but the cell
-        # makes re-running after a partial run merge cleanly.
+        # First notebook of the chain — usually nothing to restore, but the cell
+        # lets a re-run after a partial pass merge cleanly.
         restore_code(),
         gpu_detect_code(),
-        run_code(json.dumps(_RESULTS_STAGES), "Data + training + evaluation."),
+        run_code(json.dumps(_DATA_TRAIN_STAGES), "Data + training (session 1)."),
         status_code(),
         results_summary_code(),
     ]
 
 
-def make_analysis() -> list[dict]:
+def make_eval_analysis() -> list[dict]:
     return [
         intro_md(
-            "DRC — Analysis & figures (fast, re-runnable)",
-            "Turns the raw results into the paper's numbers and figures. Stages: "
-            "**hill, model_comparison, clustering, transfer, predictability, "
-            "generalization, indirect_evidence, decision, figures**. All of it "
-            "reads the CSVs `kaggle_01_results` produced and runs on CPU in "
-            "minutes — so iterate here freely without ever retraining. **Attach "
-            "`kaggle_01_results`'s output dataset first** (*Add Input*) so the "
-            "restore cell brings in `results/` and `models/`.",
-            "**Scope:** `only=" + json.dumps(_ANALYSIS_STAGES) + "`. No GPU needed.",
+            "DRC 01b — Evaluation + analysis + figures (session 2)",
+            "Session 2 of two. Turns the trained models into results: SLOR + "
+            "n-gram evaluation, then the Hill fits, E0 indirect-evidence index, "
+            "model comparison, clustering, transfer, predictability, "
+            "generalization, the decision rule, and all figures. Budget ~2-3 h "
+            "(eval needs the GPU; the analysis is CPU). **Attach "
+            "`kaggle_01a_data_train`'s output dataset first** (*Add Input -> Your "
+            "Datasets*) so the restore cell brings in the trained `models/` and "
+            "the `data/`. Re-running is cheap — eval skips once "
+            "`eval_results.csv` exists, so you can iterate on the analysis.",
+            "**Scope:** `only=" + json.dumps(_EVAL_ANALYSIS_STAGES) + "`.",
         ),
-        # Analysis needs only the core deps (numpy/scipy/pandas/sklearn/matplotlib),
-        # which a plain editable install provides — no torch, no `train` extra.
         setup_code(
-            extras="",
-            pip_packages="",
-            extras_comment="Analysis needs only the core deps (scipy/sklearn/"
-            "matplotlib/pandas); no GPU stack.",
+            extras="train",  # eval imports torch
+            pip_packages="",  # deps handled by the explicit cell below
+            extras_comment="Eval needs torch (on Kaggle already); analysis uses "
+            "scipy/sklearn/matplotlib (also present).",
         ),
+        deps_code(["stanza"]),
         restore_code(),
         gpu_detect_code(),
-        run_code(json.dumps(_ANALYSIS_STAGES), "Analysis and figures only."),
+        run_code(json.dumps(_EVAL_ANALYSIS_STAGES), "Eval + analysis (session 2)."),
         status_code(),
     ]
 
@@ -768,15 +764,15 @@ def make_smoke() -> list[dict]:
 
 def main() -> None:
     NOTEBOOKS_DIR.mkdir(parents=True, exist_ok=True)
-    # Remove the old four-way split notebooks if present, so the directory
-    # reflects the current notebook design.
+    # Remove superseded notebooks so the directory reflects the current design.
     for stale in ("kaggle_00_data.ipynb", "kaggle_01_train.ipynb",
-                  "kaggle_02_eval_analysis.ipynb"):
+                  "kaggle_02_eval_analysis.ipynb", "kaggle_01_results.ipynb",
+                  "kaggle_02_analysis.ipynb"):
         (NOTEBOOKS_DIR / stale).unlink(missing_ok=True)
     notebooks = {
         "kaggle_00_smoke.ipynb": make_smoke(),
-        "kaggle_01_results.ipynb": make_results(),
-        "kaggle_02_analysis.ipynb": make_analysis(),
+        "kaggle_01a_data_train.ipynb": make_data_train(),
+        "kaggle_01b_eval_analysis.ipynb": make_eval_analysis(),
         "kaggle_run_all.ipynb": make_run_all(),
     }
     for name, cells in notebooks.items():
