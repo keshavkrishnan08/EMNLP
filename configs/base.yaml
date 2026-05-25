@@ -25,7 +25,10 @@ training:
   adam_beta2: 0.98
   adam_epsilon: 1.0e-6
   weight_decay: 0.1
-  num_epochs: 20
+  num_epochs: 14          # trimmed from 20 to fit a single-GPU ~14h budget;
+                          # frozen across all runs, so the dose-response
+                          # comparison stays valid. Bump back to ~20 for a
+                          # final/camera-ready run if you have the compute.
   mlm_probability: 0.15
   whole_word_masking: true
   max_grad_norm: 1.0

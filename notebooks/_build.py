@@ -249,11 +249,21 @@ if SRC not in sys.path:
 os.environ["PYTHONPATH"] = SRC + os.pathsep + os.environ.get("PYTHONPATH", "")
 
 # Work from the repo root so the config's RELATIVE paths resolve under it.
-os.chdir(WORK)
-print("cwd:", os.getcwd())
+if WORK.exists():
+    os.chdir(WORK)
+    print("cwd:", os.getcwd())
+else:
+    print("=" * 70)
+    print(f"[error] {{WORK}} does not exist — the clone FAILED.")
+    print("Almost certainly: Kaggle INTERNET IS OFF for this notebook.")
+    print("Fix: Settings (right panel) -> Internet -> ON (needs a phone-verified")
+    print("account), then re-run. The pipeline also downloads BabyLM from")
+    print("HuggingFace, so internet is required regardless of the clone.")
+    print("Alternatively, upload the repo as a Kaggle dataset (Add Input).")
+    print("=" * 70)
 print("drc importable:", _have_drc())
 if not _have_drc():
-    print("[error] `drc` still not importable — check the clone/install output above.")
+    print("[error] `drc` not importable — see the message above (likely no internet).")
 '''
     )
 
@@ -310,6 +320,12 @@ def gpu_detect_code() -> dict:
     return code(
         '''
 # --- Detect GPUs and pick the sweep mode. --------------------------------------
+# Set this True to run SEQUENTIALLY on a single card even when two are present
+# (e.g. on a T4 x2 box, to use the faster T4 fp16 path without the parallel
+# orchestration). The sweep then trains one model at a time on GPU 0.
+FORCE_SINGLE_GPU = False
+
+import os
 import subprocess
 
 n_gpus = 0
@@ -322,14 +338,18 @@ try:
 except FileNotFoundError:
     print("nvidia-smi not found — assuming no GPU (CPU-only).")
 
-SINGLE_GPU = n_gpus < 2
+SINGLE_GPU = FORCE_SINGLE_GPU or (n_gpus < 2)
+if FORCE_SINGLE_GPU and n_gpus >= 2:
+    # Use one card only: pin the env so every training subprocess sees GPU 0.
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    print("FORCE_SINGLE_GPU set: using GPU 0 only, running sequentially.")
 print(f"\\nDetected {n_gpus} GPU(s). SINGLE_GPU = {SINGLE_GPU}")
 
-if n_gpus >= 2:
-    print("Dual-GPU: the sweep runs two training jobs in parallel, one per card.")
-elif n_gpus == 1:
-    print("Single-GPU: the sweep uses the 48-run fallback (drops dose=4).")
+if SINGLE_GPU:
+    print("Single-GPU: the sweep trains one model at a time on GPU 0 (no parallelism).")
 else:
+    print("Dual-GPU: the sweep runs two training jobs in parallel, one per card.")
+if n_gpus == 0:
     print("No GPU: training/eval stages will fail; set Accelerator to GPU T4 x2.")
 
 print(

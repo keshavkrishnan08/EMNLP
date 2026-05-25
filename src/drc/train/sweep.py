@@ -52,8 +52,11 @@ PILOT_CONSTRUCTION = "aann"
 PILOT_DOSE = "all"
 PILOT_SEED = 42
 
-# Dose we drop in the single-GPU degradation plan (60 -> 48 runs).
-SINGLE_GPU_DROP_DOSE = 4
+# Single-GPU mode used to drop a dose to save time, but that left core
+# constructions with only 4 dose points (an exactly-determined Hill fit with no
+# room for a meaningful CI). We'd rather keep all 5 points and save time via
+# fewer epochs instead, so single-GPU now runs the full grid sequentially.
+SINGLE_GPU_DROP_DOSE = None
 
 
 def _grid(config: dict[str, Any], drop_dose: Any | None = None) -> list[tuple[str, Any, int]]:
@@ -245,10 +248,7 @@ def run_sweep(
 
     drop = SINGLE_GPU_DROP_DOSE if single_gpu else None
     if single_gpu:
-        logger.info(
-            "Single-GPU mode: dropping core dose=%s to fit the session budget.",
-            SINGLE_GPU_DROP_DOSE,
-        )
+        logger.info("Single-GPU mode: running the full grid sequentially.")
     grid = _grid(config, drop_dose=drop)
 
     results_root = resolve_path(config_path, config["paths"]["results"])
