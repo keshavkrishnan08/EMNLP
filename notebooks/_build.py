@@ -342,6 +342,41 @@ print(
     )
 
 
+def deps_code(packages: list[str]) -> dict:
+    """An explicit, always-runs cell that installs the deps Kaggle's image lacks.
+
+    Deliberately its own cell rather than buried in the setup logic: that way the
+    install can't be skipped by a branch, you can see exactly what's installed,
+    and you can add a package by editing one obvious list. Idempotent — pip skips
+    anything already present.
+    """
+    pkgs = " ".join(packages)
+    return code(
+        f'''
+# --- Install runtime dependencies Kaggle's image doesn't ship. -----------------
+# `stanza` (used by the parse stage) is not on the Kaggle GPU image; torch,
+# transformers, datasets, scipy, sklearn, matplotlib already are. This runs every
+# time and is idempotent, so the parse stage can always `import stanza`.
+import subprocess, sys
+
+PACKAGES = "{pkgs}".split()
+if PACKAGES:
+    print("Installing:", PACKAGES)
+    rc = subprocess.call([sys.executable, "-m", "pip", "install", "-q", *PACKAGES])
+    print("pip exit code:", rc)
+    for pkg in PACKAGES:
+        mod = pkg.split("==")[0].split(">=")[0].replace("-", "_")
+        try:
+            __import__(mod)
+            print(f"  import {{mod}}: OK")
+        except Exception as exc:
+            print(f"  import {{mod}}: FAILED — {{exc}}")
+else:
+    print("No extra packages to install.")
+'''
+    )
+
+
 def run_code(only_expr: str, only_human: str, config_path: str = "configs/base.yaml") -> dict:
     """The cell that actually calls the pipeline runner.
 
@@ -595,9 +630,10 @@ def make_run_all() -> list[dict]:
         # The master needs everything: ML stack + data deps + analysis deps.
         setup_code(
             extras="train",
-            pip_packages="stanza datasets scipy scikit-learn matplotlib",
-            extras_comment="Master notebook: install the full stack (train + data + analysis).",
+            pip_packages="",  # deps handled by the explicit cell below
+            extras_comment="Master notebook: full stack; deps installed next cell.",
         ),
+        deps_code(["stanza"]),
         restore_code(),
         gpu_detect_code(),
         run_code("None  # None == run every stage", "Run all stages: only=None."),
@@ -635,11 +671,10 @@ def make_results() -> list[dict]:
         ),
         setup_code(
             extras="train",
-            # stanza is the one runtime dep not on Kaggle's image; install it
-            # explicitly so parsing works regardless of the [train] extra resolve.
-            pip_packages="stanza",
-            extras_comment=_TRAIN_COMMENT + " (plus stanza, which Kaggle lacks).",
+            pip_packages="",  # deps handled by the explicit cell below
+            extras_comment=_TRAIN_COMMENT,
         ),
+        deps_code(["stanza"]),
         # Usually nothing to restore (this is the first notebook), but the cell
         # makes re-running after a partial run merge cleanly.
         restore_code(),
@@ -696,12 +731,10 @@ def make_smoke() -> list[dict]:
         ),
         setup_code(
             extras="train",
-            # Kaggle's GPU image already has torch/transformers/etc.; the one
-            # runtime dep it lacks is stanza (for parsing). Install it explicitly
-            # so the parse stage works even if the [train] extra resolve is skipped.
-            pip_packages="stanza",
-            extras_comment="Smoke runs every stage; stanza is the dep Kaggle lacks.",
+            pip_packages="",  # deps handled by the explicit cell below
+            extras_comment="Smoke runs every stage; deps installed in the next cell.",
         ),
+        deps_code(["stanza"]),
         restore_code(),
         gpu_detect_code(),
         run_code(
