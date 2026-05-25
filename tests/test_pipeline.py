@@ -63,17 +63,23 @@ def test_skipped_dependency_still_satisfies_dependents():
     assert results["b"].status == DONE
 
 
-def test_critical_failure_aborts_remaining_stages():
-    """A critical stage that fails stops the pipeline."""
+def test_critical_failure_does_not_abort_the_run():
+    """Even a critical failure keeps the run going (max fault-tolerance).
+
+    A critical stage that fails is recorded, but independent later stages still
+    run; only its dependents are blocked. The run never hard-stops.
+    """
     ran = []
     stages = [
         Stage("a", _boom, critical=True),
-        Stage("b", lambda: ran.append("b")),
+        Stage("b", lambda: ran.append("b")),                      # independent -> runs
+        Stage("c", lambda: ran.append("c"), requires=("a",)),     # depends on a -> blocked
     ]
     results = run_pipeline(stages)
     assert results["a"].status == FAILED
-    assert "b" not in results  # never reached
-    assert ran == []
+    assert results["b"].status == DONE
+    assert results["c"].status == BLOCKED
+    assert ran == ["b"]
 
 
 def test_force_reruns_a_completed_stage():

@@ -152,15 +152,19 @@ def run_pilot(config_path: Path, config: dict[str, Any]) -> bool:
     pilot = _pilot_run(config)
     threshold = float(config["evaluation"]["pilot_max_perplexity"])
 
-    if is_done(config, config_path, pilot):
-        logger.info("Pilot already trained; reading its metrics.")
-    else:
-        logger.info("Training pilot %s before the full sweep...", run_name(*pilot))
-        train_one(config_path, *pilot)
+    try:
+        if is_done(config, config_path, pilot):
+            logger.info("Pilot already trained; reading its metrics.")
+        else:
+            logger.info("Training pilot %s before the full sweep...", run_name(*pilot))
+            train_one(config_path, *pilot)
 
-    with open(_metrics_path(config, config_path, pilot), encoding="utf-8") as fh:
-        metrics = json.load(fh)
-    ppl = metrics.get("heldout_perplexity", float("inf"))
+        with open(_metrics_path(config, config_path, pilot), encoding="utf-8") as fh:
+            metrics = json.load(fh)
+        ppl = metrics.get("heldout_perplexity", float("inf"))
+    except Exception as exc:  # noqa: BLE001 - never let the pilot crash the sweep
+        logger.error("Pilot run errored (%s); treating as a failed gate.", exc)
+        return False
 
     if ppl is None or ppl != ppl:  # None or NaN
         logger.error("Pilot perplexity is %s — recipe is broken. Stopping.", ppl)
@@ -244,7 +248,14 @@ def run_sweep(
 
     if not skip_pilot:
         if not run_pilot(config_path, config):
-            raise SystemExit("Pilot gate failed; sweep not launched.")
+            # The pilot is a warning light, not a gate: a broken recipe usually
+            # means poor models, but we'd rather press on and let you see the
+            # results than halt the whole run. Re-run with skip_pilot to silence.
+            logger.error(
+                "PILOT GATE FAILED — the recipe may be broken (check the pilot's "
+                "perplexity/loss above). Continuing the sweep anyway; expect "
+                "weak models if the pilot was genuinely bad."
+            )
 
     drop = SINGLE_GPU_DROP_DOSE if single_gpu else None
     if single_gpu:

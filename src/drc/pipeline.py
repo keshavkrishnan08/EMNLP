@@ -188,11 +188,15 @@ def run_pipeline(
             results[stage.name] = StageResult(
                 stage.name, FAILED, seconds=time.time() - t0, detail=str(exc)
             )
-            logger.error("[fail] %s — %s", stage.name, exc)
+            tag = "critical " if stage.critical else ""
+            # We never abort the whole run on a failure — not even a critical one.
+            # A failed stage just means its dependents get blocked; everything
+            # independent still runs. The dashboard shows exactly what happened.
+            logger.error(
+                "[fail] %s%s — %s; continuing (dependents will be blocked).",
+                tag, stage.name, exc,
+            )
             persist()
-            if stage.critical:
-                logger.error("Stage %s is critical; stopping the pipeline.", stage.name)
-                break
             continue
         persist()
 
