@@ -216,33 +216,38 @@ else:
     else:
         print(f"Using existing checkout at {{WORK}}")
 
-    # Try an editable install with the extra; degrade gracefully on any failure.
+    # Editable install so the deps land and `drc` is registered for subprocesses
+    # too. NOTE: the extras brackets go INSIDE the quotes — pip install -e
+    # "PATH[extra]" — otherwise the shell splits off "[extra]" and pip errors.
     installed = False
     if EXTRA:
-        rc = subprocess.call(
-            f'pip install -q -e "{{WORK}}"[{{EXTRA}}]', shell=True
-        )
-        installed = rc == 0
+        installed = subprocess.call(f'pip install -q -e "{{WORK}}[{{EXTRA}}]"', shell=True) == 0
         if not installed:
-            print(f"[warn] editable install with [{{EXTRA}}] failed; trying plain -e")
+            print("[warn] editable install with the extra failed; trying plain -e")
     if not installed:
-        rc = subprocess.call(f'pip install -q -e "{{WORK}}"', shell=True)
-        installed = rc == 0
+        installed = subprocess.call(f'pip install -q -e "{{WORK}}"', shell=True) == 0
     if not installed:
-        # Last resort: don't install, just put src/ on the path so imports work.
-        src = str(WORK / "src")
-        if src not in sys.path:
-            sys.path.insert(0, src)
-        print(f"[warn] pip install failed; added {{src}} to sys.path as fallback.")
+        print("[warn] editable install failed; relying on PYTHONPATH below.")
 
     # Notebook-specific plain packages (e.g. stanza, scipy) on top of the base.
     if PIP_PACKAGES.strip():
         _run(f"pip install -q {{PIP_PACKAGES}}")
 
+# Make `drc` importable BOTH here and in the subprocesses the pipeline spawns.
+# The pipeline runs each stage as `python -m drc...`, a fresh process that
+# inherits PYTHONPATH (not this cell's sys.path), so we set both. This is what
+# makes the run work even if the editable install above didn't register.
+SRC = str(WORK / "src")
+if SRC not in sys.path:
+    sys.path.insert(0, SRC)
+os.environ["PYTHONPATH"] = SRC + os.pathsep + os.environ.get("PYTHONPATH", "")
+
 # Work from the repo root so the config's RELATIVE paths resolve under it.
 os.chdir(WORK)
 print("cwd:", os.getcwd())
 print("drc importable:", _have_drc())
+if not _have_drc():
+    print("[error] `drc` still not importable — check the clone/install output above.")
 '''
     )
 
@@ -342,22 +347,28 @@ def run_code(only_expr: str, only_human: str, config_path: str = "configs/base.y
 # --- Run the pipeline. ---------------------------------------------------------
 # default_phases() returns the wired stages; run_pipeline() isolates failures,
 # skips finished stages, blocks stages with unmet deps, and prints a dashboard.
-# It never raises on a stage failure, so this cell completes even if a stage dies.
+# It never raises on a stage failure. We also wrap the whole cell so that even a
+# setup/import problem prints instead of halting — the status cells below still run.
+import traceback
 from pathlib import Path
-from drc.pipeline import default_phases, run_pipeline
-from drc.data.download import load_config, resolve_path
 
 CONFIG_PATH = "{config_path}"          # reused by the cells below
-cfg = Path(CONFIG_PATH)
-results_dir = resolve_path(cfg, load_config(cfg)["paths"]["results"])
-status = results_dir / "pipeline_status.json"
-
 # {only_human}
 only = {only_expr}
 
-stages = default_phases(cfg, single_gpu=SINGLE_GPU)
-results = run_pipeline(stages, status_path=status, only=only)
-# The dashboard is already printed above by run_pipeline.
+try:
+    from drc.pipeline import default_phases, run_pipeline
+    from drc.data.download import load_config, resolve_path
+
+    cfg = Path(CONFIG_PATH)
+    results_dir = resolve_path(cfg, load_config(cfg)["paths"]["results"])
+    status = results_dir / "pipeline_status.json"
+    stages = default_phases(cfg, single_gpu=SINGLE_GPU)
+    results = run_pipeline(stages, status_path=status, only=only)
+    # The dashboard is already printed above by run_pipeline.
+except Exception:
+    print("[error] the run cell hit an exception; the cells below will still run.")
+    traceback.print_exc()
 '''
     )
 
@@ -367,38 +378,45 @@ def status_code() -> dict:
     return code(
         '''
 # --- Inspect what we produced. -------------------------------------------------
-# Tolerant of missing files: a fresh or partial run just shows fewer artifacts.
-# Reads the results dir from the same config the run cell used (CONFIG_PATH).
+# Tolerant of missing files and of being run on its own: a fresh or partial run
+# just shows fewer artifacts. Wrapped so it never halts a Run All.
 import json
+import traceback
 from pathlib import Path
-from drc.data.download import load_config, resolve_path
 
-results_dir = resolve_path(Path(CONFIG_PATH), load_config(CONFIG_PATH)["paths"]["results"])
+CONFIG_PATH = globals().get("CONFIG_PATH", "configs/base.yaml")
+try:
+    from drc.data.download import load_config, resolve_path
 
-status_path = results_dir / "pipeline_status.json"
-if status_path.exists():
-    data = json.loads(status_path.read_text())
-    print("Pipeline status:")
-    for name, r in data.items():
-        secs = f"{r.get('seconds', 0):.1f}s" if r.get("seconds") else ""
-        detail = f"  {r['detail']}" if r.get("detail") else ""
-        print(f"  {r['status']:<8} {name:<18} {secs}{detail}")
-else:
-    print(f"No {status_path} yet — has the run cell completed?")
+    results_dir = resolve_path(Path(CONFIG_PATH), load_config(CONFIG_PATH)["paths"]["results"])
 
-for d in (results_dir, results_dir / "figures"):
-    if d.is_dir():
-        items = sorted(x.name for x in d.iterdir())
-        print(f"\\n{d}/ ({len(items)} items):")
-        for it in items:
-            print("  ", it)
+    status_path = results_dir / "pipeline_status.json"
+    if status_path.exists():
+        data = json.loads(status_path.read_text())
+        print("Pipeline status:")
+        for name, r in data.items():
+            secs = f"{r.get('seconds', 0):.1f}s" if r.get("seconds") else ""
+            detail = f"  {r['detail']}" if r.get("detail") else ""
+            print(f"  {r['status']:<8} {name:<18} {secs}{detail}")
     else:
-        print(f"\\n{d}/ does not exist yet.")
+        print(f"No {status_path} yet — has the run cell completed?")
 
-decision = results_dir / "decision.txt"
-if decision.exists():
-    print("\\n=== decision.txt ===")
-    print(decision.read_text())
+    for d in (results_dir, results_dir / "figures"):
+        if d.is_dir():
+            items = sorted(x.name for x in d.iterdir())
+            print(f"\\n{d}/ ({len(items)} items):")
+            for it in items:
+                print("  ", it)
+        else:
+            print(f"\\n{d}/ does not exist yet.")
+
+    decision = results_dir / "decision.txt"
+    if decision.exists():
+        print("\\n=== decision.txt ===")
+        print(decision.read_text())
+except Exception:
+    print("[error] status cell failed; continuing.")
+    traceback.print_exc()
 '''
     )
 
@@ -418,6 +436,8 @@ def results_summary_code() -> dict:
 # and the E0 / E_max each construction landed at, so you can judge the run.
 import json
 from pathlib import Path
+
+CONFIG_PATH = globals().get("CONFIG_PATH", "configs/base.yaml")
 from drc.data.download import load_config, resolve_path
 
 _paths = load_config(CONFIG_PATH)["paths"]
