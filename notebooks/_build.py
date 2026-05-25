@@ -102,10 +102,9 @@ stopped instead of redoing hours of work.
 - Set the accelerator to **GPU T4 x2** (Settings -> Accelerator -> *GPU T4 x2*).
   With two cards the training sweep runs two jobs in parallel; with one it falls
   back to a 48-run single-GPU plan.
-- **T4 is a Turing GPU and does not support bf16.** The shipped
-  `configs/base.yaml` sets `precision: bf16`. Before training on T4, change that
-  line to `precision: fp16`. The GPU-detect cell below reminds you; it does not
-  edit the config for you.
+- **Precision is automatic.** The trainer picks bf16 on GPUs that support it,
+  fp16 (with a GradScaler) on a T4, and fp32 on CPU — so you don't need to edit
+  `configs/base.yaml`, even though it says `bf16`.
 
 ## Two notebooks
 
@@ -334,9 +333,9 @@ else:
     print("No GPU: training/eval stages will fail; set Accelerator to GPU T4 x2.")
 
 print(
-    "\\n[CAVEAT] T4 is a Turing card and does NOT support bf16. The shipped"
-    "\\n         configs/base.yaml uses precision: bf16. Before training on T4,"
-    "\\n         edit that line to  precision: fp16  (this cell does not edit it)."
+    "\\n[note] Precision is auto-selected by the trainer: bf16 on GPUs that"
+    "\\n       support it (Ampere+), fp16 on a T4 (with a GradScaler), fp32 on"
+    "\\n       CPU. You do NOT need to edit configs/base.yaml for the T4."
 )
 '''
     )

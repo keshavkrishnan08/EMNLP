@@ -309,14 +309,36 @@ def train_one(
     warmup_steps = int(total_steps * float(t["warmup_ratio"]))
     scheduler = _cosine_with_warmup(optimizer, warmup_steps, total_steps)
 
-    use_bf16 = str(t["precision"]).lower() == "bf16" and device.type == "cuda"
+    # Mixed precision. Resolve to what the GPU actually supports so the config
+    # can't ask for something the hardware can't do:
+    #   - bf16  : only on GPUs that support it (Ampere+). T4 (Turing) does NOT,
+    #             so we transparently fall back to fp16 there.
+    #   - fp16  : float16 autocast + GradScaler (the fast path on T4 tensor cores).
+    #   - else  : full fp32 (CPU, or if you force it).
+    # fp16 is the one that needs a GradScaler; bf16 has the dynamic range not to.
+    prec = str(t["precision"]).lower()
+    amp_dtype = None
+    if device.type == "cuda":
+        if prec == "bf16" and not torch.cuda.is_bf16_supported():
+            logger.warning("bf16 unsupported on this GPU (e.g. T4); using fp16.")
+            prec = "fp16"
+        if prec == "bf16":
+            amp_dtype = torch.bfloat16
+        elif prec == "fp16":
+            amp_dtype = torch.float16
+    use_amp = amp_dtype is not None
+    use_scaler = amp_dtype == torch.float16
+    scaler = torch.cuda.amp.GradScaler(enabled=use_scaler)
+
     max_grad_norm = float(t["max_grad_norm"])
     log_every = int(t["log_every_n_steps"])
     save_every = int(t["save_every_n_epochs"])
 
     logger.info(
-        "Training %d epochs, %d steps/epoch, %d total steps, %d warmup, bf16=%s.",
-        num_epochs, steps_per_epoch, total_steps, warmup_steps, use_bf16,
+        "Training %d epochs, %d steps/epoch, %d total steps, %d warmup; "
+        "device=%s precision=%s (amp=%s, scaler=%s).",
+        num_epochs, steps_per_epoch, total_steps, warmup_steps,
+        device.type, prec if use_amp else "fp32", use_amp, use_scaler,
     )
 
     # --- Training loop --------------------------------------------------------
@@ -328,8 +350,8 @@ def train_one(
                 batch = {k: v.to(device) for k, v in batch.items()}
 
                 optimizer.zero_grad(set_to_none=True)
-                if use_bf16:
-                    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                if use_amp:
+                    with torch.autocast(device_type="cuda", dtype=amp_dtype):
                         out = model(**batch)
                         loss = out.loss
                 else:
@@ -343,9 +365,19 @@ def train_one(
                         f"step {global_step} (epoch {epoch}). Aborting this run."
                     )
 
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-                optimizer.step()
+                # fp16 needs loss scaling to keep small gradients from underflowing;
+                # the scaler unscales before clipping and skips the step on overflow.
+                # bf16/fp32 take the plain path (the scaler is a no-op when disabled).
+                if use_scaler:
+                    scaler.scale(loss).backward()
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                    optimizer.step()
                 scheduler.step()
                 global_step += 1
 
